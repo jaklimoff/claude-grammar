@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
-import { checkFor, parseReply, system, usefulNatural } from '../hooks/grammar'
+import { checkFor, parseReply, system, typedPart, usefulNatural } from '../hooks/grammar'
 
 const FIXES = {
   english: true,
@@ -140,6 +140,17 @@ test('slash commands and sent answers are not checked', async ($, on) => {
   await $.prompt.submit({ text: 'Answers to your questions:\n#1 ("Which port?"): 4222' } as never)
   await clock.advance(5)
   expect(asked).toEqual([])
+})
+
+test('answers appended by open-questions are not checked with the prompt', async ($, on) => {
+  const clock = mock.clock(on)
+  const asked = haiku(on, FIXES)
+  const sent = `${TYPO}\n\nAnswer to your question #1 ("Which port do you want?"): 4222`
+  await $.prompt.submit({ text: sent } as never)
+  await clock.advance(5)
+  expect(asked).toEqual([TYPO])
+  expect(await (await mountRow($, sent)).find({ key: 'gr-fixes' })).toBeDefined()
+  expect(typedPart('Answers to your questions:\n#1 ("x"): y')).toBe('')
 })
 
 test('the reply is parsed, and a row finds its check even with text appended', () => {

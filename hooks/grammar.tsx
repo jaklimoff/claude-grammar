@@ -76,8 +76,14 @@ export const checkFor = (all: GrammarCheck[], rowText: string): GrammarCheck | u
   return all.find(c => c.text !== '' && row.startsWith(c.text))
 }
 
-/** Answers sent from the open-questions plugin (github.com/jaklimoff/claude-open-questions) hold Claude's own words: not checked. */
-const isAnswersMessage = (text: string) => /^Answers? to your question/.test(text)
+// Answers sent by the open-questions plugin (github.com/jaklimoff/claude-open-questions) quote Claude's own words: not checked.
+const ANSWERS = /(^|\n\n)Answers? to your question/
+
+/** The part of a prompt you typed: without the answers open-questions may have appended. */
+export const typedPart = (text: string) => {
+  const m = ANSWERS.exec(text)
+  return (m === null ? text : text.slice(0, m.index)).trim()
+}
 
 const setOn = async ($: EngineInterface, on: boolean) => {
   await update($, isOn, () => on)
@@ -114,14 +120,14 @@ const run = async ($: EngineInterface, id: number, text: string) => {
 const queue = async ($: EngineInterface, e: { text: string }) => {
   // Slash commands and hidden prompts are not typed English. Loose, as older type builds lack both fields.
   const { command, isMeta } = e as { command?: unknown; isMeta?: boolean }
-  if (command !== undefined || isMeta === true || isAnswersMessage(e.text) || !(await read($, isOn))) {
+  const text = typedPart(e.text)
+  if (command !== undefined || isMeta === true || !/[A-Za-z]{2}/.test(text) || !(await read($, isOn))) {
     return
   }
   // A run that draws nowhere (claude -p, the SDK) would never show the fixes: no Haiku call there.
   if ((await $.session.surfaces()).length === 0) {
     return
   }
-  const text = e.text.trim()
   const id = await update($, lastId, n => n + 1)
   await update($, checks, all => [{ id, text, status: 'checking' as const, fixes: [] }, ...all].slice(0, MAX_CHECKS))
   // A timer, so the check outlives this dispatch and the prompt is not held up.

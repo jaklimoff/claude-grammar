@@ -65,7 +65,7 @@ claude plugin test .
 
 For development, start Claude Code with `claude --plugin-dir <path to this folder>`.
 
-Works well beside [open-questions](https://github.com/jaklimoff/claude-open-questions): the answers it sends for you are not checked, since they hold Claude's own words.
+Works well beside [open-questions](https://github.com/jaklimoff/claude-open-questions): the answers it sends or appends for you are not checked, since they quote Claude's own words.
 
 ## Contributing
 

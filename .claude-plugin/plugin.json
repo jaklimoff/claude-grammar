@@ -1,0 +1,12 @@
+{
+  "name": "grammar",
+  "version": "1.0.0",
+  "description": "Haiku checks the English of each prompt you send to Claude Code and shows the fixes under it",
+  "author": {
+    "name": "Jack Klimov",
+    "url": "https://jack.direct"
+  },
+  "repository": "https://github.com/jaklimoff/claude-grammar",
+  "types": "./types/index.d.ts",
+  "license": "MIT"
+}

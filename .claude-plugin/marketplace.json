@@ -1,0 +1,14 @@
+{
+  "name": "grammar",
+  "owner": {
+    "name": "Jack Klimov"
+  },
+  "plugins": [
+    {
+      "name": "grammar",
+      "source": "./",
+      "description": "Haiku checks the English of each prompt you send to Claude Code and shows the fixes under it"
+    }
+  ],
+  "description": "Haiku checks the English of each prompt you send to Claude Code and shows the fixes under it"
+}

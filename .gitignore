@@ -2,3 +2,4 @@
 .claude-plugin/types/
 tsconfig.json
 docs/demo.gif
+docs/cost-*.png

@@ -8,6 +8,13 @@ A Claude Code plugin that checks the English of each prompt you send and shows t
 
 If English is not your first language, you write a lot of it in your prompts, and nobody tells you where it goes wrong. Claude understands you anyway, so the same mistakes stay. With this plugin, Haiku proofreads each prompt after you send it, and a dim line under that prompt shows what to fix: the wrong words struck through in red, the fixes in green, and a few words on why. When a sentence still sounds off once the grammar is fixed, a second line shows how a native speaker would say it.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jaklimoff/claude-grammar/media/cost-brand-dark.png">
+  <img alt="What the grammar check costs: a 50-prompt session is $0.003 to $0.035. Per check: a clean prompt $0.00006 (539 tokens in, 21 out); 3 mistakes $0.0003 to $0.0005 (550 in, 540 to 820 out); 5+ mistakes $0.0006 to $0.0007 (575 in, 1,010 to 1,250 out). Claude Haiku 5.5 at low effort, API prices, measured 2026-10-30." src="https://raw.githubusercontent.com/jaklimoff/claude-grammar/media/cost-brand-light.png">
+</picture>
+
+How it was measured: [Privacy and cost](#privacy-and-cost).
+
 ## Install
 
 ```
@@ -44,6 +51,16 @@ The native-speaker line is rare on purpose. It shows only when a sentence is cle
 ## Privacy and cost
 
 Each prompt you type (its first 6000 characters) goes to Haiku through Claude Code's own model access, on the same account and provider as the rest of your session. That is one small Haiku call per prompt, at low effort, counted in your usage like any other call. Nothing goes anywhere else.
+
+What one check costs, measured on 2026-10-30 with the mod's system prompt (natural phrasing on), Claude Haiku 5.5 at low effort, 5 runs per prompt:
+
+| Prompt | Input tokens | Output tokens | Cost at API prices |
+|---|---|---|---|
+| Clean, 35 characters | 539 | 21 | ~$0.00006 |
+| 3 mistakes, 80 characters | 550 | 540 to 820 | ~$0.0003 to $0.0005 |
+| 5+ mistakes, 200 characters | 575 | 1,010 to 1,250 | ~$0.0006 to $0.0007 |
+
+About 517 of the input tokens are the mod's instructions. A clean prompt costs almost nothing to answer; when Haiku finds mistakes, it thinks and writes out the fixes, and that is most of the output. A session of 50 prompts comes to roughly 30K tokens if you write clean and up to 90K if every prompt has several mistakes: about $0.003 to $0.035 at Haiku's API prices ($0.10 per 1M input tokens, $0.50 per 1M output). On a subscription the same tokens count toward your plan's usage instead. `/grammar off` stops the calls.
 
 A mod is code that runs inside Claude Code with your permissions, so read it before you install it. This one uses only:
 

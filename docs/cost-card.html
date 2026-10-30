@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Grammar check cost</title>
+<!-- Source of docs/cost-*.png. Render: docs/render-cost.sh. Numbers: README, Privacy and cost. -->
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2328; --muted: #59636e; --faint: #d1d9e0;
+    --track: #eff2f5; --accent: #C15F3C; --accent-soft: #e9b9a6;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --ink: #e6edf3; --muted: #9198a1; --faint: #30363d;
+    --track: #161b22; --accent: #D4775A; --accent-soft: #6b3c2d;
+  }
+  /* jack.direct colors (blog src/styles/global.css): indigo on the blog's surfaces, card with round corners */
+  :root[data-palette="brand"] {
+    --bg: #f7f7f5; --ink: #111214; --muted: #5c6068; --faint: #e4e4e0;
+    --track: #efefec; --accent: #4f5bd5; --bar: #4f5bd5; --accent-soft: #c3c7f1;
+  }
+  :root[data-palette="brand"][data-theme="dark"] {
+    --bg: #131316; --ink: #f2f2f3; --muted: #9a9da5; --faint: #222226;
+    --track: #1a1a1e; --accent: #8b8fff; --bar: #7f84fb; --accent-soft: #34366b;
+  }
+  :root[data-palette="brand"] html, :root[data-palette="brand"] { background: transparent; }
+  :root[data-palette="brand"] body { border-radius: 20px; border: 1px solid var(--faint); }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: var(--bg); }
+  body {
+    width: 1000px; height: 480px; padding: 40px 48px;
+    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+  }
+  .kicker { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .hero { font-size: 40px; font-weight: 650; margin-top: 10px; letter-spacing: -.01em; }
+  .hero b { color: var(--accent); font-weight: 650; }
+  .sub { font-size: 16px; color: var(--muted); margin-top: 8px; }
+  .rows { margin-top: 30px; border-top: 1px solid var(--faint); }
+  .row {
+    display: grid; grid-template-columns: 300px 1fr 190px; align-items: center;
+    gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--faint);
+  }
+  .name { font-size: 18px; font-weight: 600; }
+  .tok { font-size: 14px; color: var(--muted); margin-top: 3px; font-family: "SF Mono", Menlo, monospace; }
+  .track { position: relative; height: 12px; background: var(--track); border-radius: 0 4px 4px 0; }
+  .seg { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 0 4px 4px 0; }
+  .range { background: var(--accent-soft); }
+  .solid { background: var(--bar, var(--accent)); }
+  .cost { font-size: 19px; text-align: right; font-family: "SF Mono", Menlo, monospace; }
+  .foot { font-size: 14px; color: var(--muted); margin-top: 18px; }
+  code { font-family: "SF Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+  <div class="kicker">What the grammar check costs</div>
+  <div class="hero">A 50-prompt session: <b>$0.003 to $0.035</b></div>
+  <div class="sub">One Claude Haiku 5.5 call per prompt at low effort. Measured 2026-10-30, 5 runs per prompt, API prices.</div>
+
+  <div class="rows">
+    <!-- bar scale: 0 to $0.0007 per check; solid = cheapest run, light = most expensive run -->
+    <div class="row">
+      <div><div class="name">Clean prompt</div><div class="tok">539 in · 21 out</div></div>
+      <div class="track"><div class="seg solid" style="width:9.1%"></div></div>
+      <div class="cost">$0.00006</div>
+    </div>
+    <div class="row">
+      <div><div class="name">3 mistakes</div><div class="tok">550 in · 540–820 out</div></div>
+      <div class="track"><div class="seg range" style="width:66.4%"></div><div class="seg solid" style="width:46.4%"></div></div>
+      <div class="cost">$0.0003–0.0005</div>
+    </div>
+    <div class="row">
+      <div><div class="name">5+ mistakes</div><div class="tok">575 in · 1,010–1,250 out</div></div>
+      <div class="track"><div class="seg range" style="width:97.5%"></div><div class="seg solid" style="width:80.4%"></div></div>
+      <div class="cost">$0.0006–0.0007</div>
+    </div>
+  </div>
+
+  <div class="foot">Bars: the cheapest of the 5 runs, then the most expensive in the fainter shade. On a subscription the same tokens count toward your plan's usage. <code>/grammar off</code> stops the calls.</div>
+  <script>const q = new URLSearchParams(location.search); document.documentElement.dataset.theme = q.get('theme') || 'light'; document.documentElement.dataset.palette = q.get('palette') || 'anthropic';</script>
+</body>
+</html>

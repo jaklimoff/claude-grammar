@@ -17,6 +17,7 @@ export type Settings = {
   maxChars: number
   icons: boolean
   showWhy: boolean
+  history: boolean
 }
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
@@ -36,12 +37,16 @@ export const settingsFrom = (o: PluginOptions): Settings => ({
   maxChars: clamp(o.max_chars, 200, 20000, 6000),
   icons: o.icons !== false,
   showWhy: o.show_why !== false,
+  history: o.history !== false,
 })
 
-/** What a grammar.json holds: `ignore`, words or /regexes/ never flagged; `skip`, regexes of prompts never checked. */
-export type Lists = { ignore: string[]; skip: string[] }
+/**
+ * What a grammar.json holds: `ignore`, words or /regexes/ never flagged; `skip`, regexes of prompts never checked;
+ * `history`, false to keep no fixes (a project that should leave no trace).
+ */
+export type Lists = { ignore: string[]; skip: string[]; history: boolean }
 
-export const EMPTY: Lists = { ignore: [], skip: [] }
+export const EMPTY: Lists = { ignore: [], skip: [], history: true }
 const CAP = 200
 
 const strings = (x: unknown): string[] =>
@@ -54,13 +59,14 @@ export const parseLists = (text: string): Lists => {
     throw new Error('not a JSON object')
   }
   const o = raw as Record<string, unknown>
-  return { ignore: strings(o.ignore), skip: strings(o.skip) }
+  return { ignore: strings(o.ignore), skip: strings(o.skip), history: o.history !== false }
 }
 
 /** Lists from several files, joined without repeats, each capped. */
 export const mergeLists = (...all: Lists[]): Lists => ({
   ignore: [...new Set(all.flatMap(l => l.ignore))].slice(0, CAP),
   skip: [...new Set(all.flatMap(l => l.skip))].slice(0, CAP),
+  history: all.every(l => l.history),
 })
 
 const SLASHED = /^\/(.+)\/([a-z]*)$/

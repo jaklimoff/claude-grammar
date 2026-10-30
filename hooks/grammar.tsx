@@ -1,9 +1,9 @@
 // Grammar: after each prompt you send, a model checks its English and a dim line under that prompt in the
 // transcript shows the fixes and, when the phrasing is clearly off, how a native speaker would say it.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderNode } from 'claude-code'
+import type { EngineInterface, ModelApiError, Register, RenderNode } from 'claude-code'
 
-import type { GrammarCheck, GrammarFix, GrammarReply } from '../types'
+import type { GrammarCheck, GrammarFix, GrammarReview } from '../types'
 import {
   EMPTY,
   applyFixes,
@@ -11,16 +11,36 @@ import {
   compileSkip,
   cut,
   entriesFrom,
-  isIgnored,
   mergeLists,
   parseLists,
   settingsFrom,
   wordCount,
 } from './config'
-import type { Dialect, Ignore, Lists, Settings } from './config'
+import type { Ignore, Lists, Settings } from './config'
+import { keepFixes, parseReply, system, typedPart } from './check'
+import {
+  EMPTY_HISTORY,
+  KEEP_DAYS,
+  MAX_ENTRIES,
+  REVIEW_FROM,
+  REVIEW_SYSTEM,
+  historyText,
+  parseHistory,
+  parsePeriod,
+  record,
+  reviewInput,
+  statsText,
+  summaryOf,
+  summaryText,
+  visible,
+  within,
+} from './history'
+import type { History, Summary } from './history'
 
 const isOn = atom({ plugin: 'grammar', key: 'grammarOn' } as const, true)
 const isNatural = atom({ plugin: 'grammar', key: 'grammarNatural' } as const, true)
+const keepsHistory = atom({ plugin: 'grammar', key: 'grammarHistory' } as const, true)
+const reviews = atom({ plugin: 'grammar', key: 'grammarReviews' } as const, [] as GrammarReview[])
 // The latest checks, newest first, each with the prompt it checked.
 const checks = atom({ plugin: 'grammar', key: 'grammarChecks' } as const, [] as GrammarCheck[])
 const lastId = atom({ plugin: 'grammar', key: 'grammarLastId' } as const, 0)
@@ -29,76 +49,15 @@ const fails = atom({ plugin: 'grammar', key: 'grammarFails' } as const, 0)
 // Where 1.0 kept the two switches; moved into the plugin's settings on the first start of 1.1.
 const STORE_ON = 'grammar.on'
 const STORE_NATURAL = 'grammar.natural'
+// Set once the history notice has shown, so it shows once, not every session the file is missing.
+const STORE_ANNOUNCED = 'grammar.historyAnnounced'
 
 const MAX_CHECKS = 200
 // Failed checks in a row before the checks pause (a blocked model, an outage).
 const MAX_FAILS = 3
-// Plain ignore words told to the model; the local filter still drops fixes for all of them.
-const MAX_PROMPT_WORDS = 100
 
 const NERD_ICONS = { logo: '', error: '', natural: '' }
 const PLAIN_ICONS = { logo: '*', error: '!', natural: '>' }
-
-const BASE = `You proofread English that a non-native speaker typed as a prompt to a coding assistant.
-Report only real mistakes: spelling and typos, grammar (tense, agreement, articles, prepositions, word order), a wrong word, a missing word.
-Ignore all of these: capitalization (a lowercase "i" or sentence start is fine), punctuation style, apostrophes left out of contractions (lets, dont, im, thats), a casual tone, slang and short forms (smth, pls, u, btw, lol, etc), code, commands, file paths, identifiers, URLs, logs, and quoted or pasted text.
-Keep the writer's voice: change as few words as possible, never rephrase for style.`
-
-const DIALECT: Record<Dialect, string> = {
-  any: 'Accept American and British spelling alike.',
-  us: 'The writer uses American English: a British spelling (colour, organise) is a spelling mistake.',
-  uk: 'The writer uses British English: an American spelling (color, organize) is a spelling mistake.',
-}
-
-const answer = (showWhy: boolean) => `Answer with JSON only, no prose and no code fence:
-{"english": true, "fixes": [{"from": "<exact words from the text>", "to": "<the fixed words>"${showWhy ? ', "why": "<2 to 4 words>"' : ''}}]}
-"fixes" is [] when the English is fine. If the text is not mainly English, answer {"english": false, "fixes": []}.`
-
-const NATURAL = `Also add "natural" to the JSON: null in most cases. Only when a native speaker would clearly say a sentence differently (an unidiomatic phrase, a word-for-word translation), even with the grammar fixed, give that one sentence the way a native speaker would say it: same meaning, same casual tone, the writer's own casing.
-Never use "natural" for style taste, for a sentence that is fine once the fixes are applied, or for code.`
-
-export type PromptParts = { natural: boolean; dialect?: Dialect; showWhy?: boolean; ignore?: readonly string[] }
-
-/** The system prompt: the rules, the spelling, the user's ignore words, the answer's shape, and the natural-phrasing ask when it is on. */
-export const system = ({ natural, dialect = 'any', showWhy = true, ignore = [] }: PromptParts) => {
-  const words = ignore.slice(0, MAX_PROMPT_WORDS)
-  const never =
-    words.length > 0 ? [`Never flag these, the writer means them as written: ${words.map(w => JSON.stringify(w)).join(', ')}.`] : []
-  return [BASE, DIALECT[dialect], ...never, answer(showWhy), ...(natural ? [NATURAL] : [])].join('\n')
-}
-
-const isFix = (x: unknown): x is GrammarFix => {
-  const f = x as Record<string, unknown>
-  return typeof f?.from === 'string' && typeof f.to === 'string'
-}
-
-/** The reply as fixes and a natural rewrite, or null when the text is not English. Throws on a reply that is not the JSON asked for. */
-export const parseReply = (text: string): GrammarReply | null => {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end < start) {
-    throw new Error('no JSON in the reply')
-  }
-  const reply = JSON.parse(text.slice(start, end + 1)) as { english?: unknown; fixes?: unknown; natural?: unknown }
-  if (reply.english === false) {
-    return null
-  }
-  if (!Array.isArray(reply.fixes)) {
-    throw new Error('no fixes in the reply')
-  }
-  const fixes = reply.fixes
-    .filter(isFix)
-    .filter(f => f.from.trim() !== f.to.trim())
-    .map(f => ({ from: f.from, to: f.to, why: typeof f.why === 'string' ? f.why : '' }))
-  const natural = typeof reply.natural === 'string' && reply.natural.trim() !== '' ? reply.natural.trim() : null
-  return { fixes, natural }
-}
-
-/** The fixes worth showing: words the prompt holds (the model may quote words that are not there), none on the ignore list. */
-export const keepFixes = (fixes: readonly GrammarFix[], text: string, ignore: Ignore) => {
-  const lower = text.toLowerCase()
-  return fixes.filter(f => f.from.trim() !== '' && lower.includes(f.from.toLowerCase()) && !isIgnored(ignore, f.from))
-}
 
 const same = (a: string, b: string) => {
   const plain = (s: string) => s.trim().toLowerCase().replace(/[.!?]+$/, '')
@@ -121,32 +80,37 @@ export const checkFor = (all: GrammarCheck[], rowText: string): GrammarCheck | u
   return all.find(c => c.text !== '' && (row === c.text || row.startsWith(`${c.text}\n`)))
 }
 
-// Answers sent by the open-questions plugin (github.com/jaklimoff/claude-open-questions) quote Claude's own words: not checked.
-const ANSWERS = /(^|\n\n)Answers? to your question/
-
-/** The part of a prompt you typed: without the answers open-questions may have appended. */
-export const typedPart = (text: string) => {
-  const m = ANSWERS.exec(text)
-  return (m === null ? text : text.slice(0, m.index)).trim()
-}
-
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-/** The user's grammar.json: in the Claude Code config folder (CLAUDE_CONFIG_DIR, else ~/.claude). */
-const globalFile = async ($: EngineInterface) => {
+/** A file in the Claude Code config folder (CLAUDE_CONFIG_DIR, else ~/.claude). */
+const configFile = async ($: EngineInterface, name: string) => {
   const dir = await $.env.get('CLAUDE_CONFIG_DIR')
   if (dir !== undefined && dir !== '') {
-    return `${dir.replace(/[\\/]+$/, '')}/grammar.json`
+    return `${dir.replace(/[\\/]+$/, '')}/${name}`
   }
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
-  return home === undefined || home === '' ? undefined : `${home.replace(/[\\/]+$/, '')}/.claude/grammar.json`
+  return home === undefined || home === '' ? undefined : `${home.replace(/[\\/]+$/, '')}/.claude/${name}`
 }
+
+/** The user's grammar.json. */
+const globalFile = ($: EngineInterface) => configFile($, 'grammar.json')
+
+/** Where the fixes are kept for /grammar stats and /grammar review. */
+const historyFile = ($: EngineInterface) => configFile($, 'grammar-history.json')
 
 /** The project's grammar.json, in its .claude folder. */
 const projectFile = async ($: EngineInterface) => `${(await $.session.root()).replace(/[\\/]+$/, '')}/.claude/grammar.json`
 
 // Broken files already reported, so each shows one toast, not one per prompt.
 const reported = new Set<string>()
+
+/** A toast once per text, so a broken file shows one, not one per prompt. */
+const toastOnce = ($: EngineInterface, note: string, timeoutMs?: number) => {
+  if (!reported.has(note)) {
+    reported.add(note)
+    $.ui.toast(note, timeoutMs === undefined ? undefined : { timeoutMs })
+  }
+}
 
 /** One file's lists: empty when it is missing; a toast, once, when it does not parse. */
 const readLists = async ($: EngineInterface, path: string): Promise<Lists> => {
@@ -156,13 +120,61 @@ const readLists = async ($: EngineInterface, path: string): Promise<Lists> => {
     }
     return parseLists(String(await $.fs.read(path)))
   } catch (err) {
-    const note = `grammar: ${path} is ignored: ${message(err)}`
-    if (!reported.has(note)) {
-      reported.add(note)
-      $.ui.toast(note)
-    }
+    toastOnce($, `grammar: ${path} is ignored: ${message(err)}`)
     return EMPTY
   }
+}
+
+/** The kept history: empty when there is none yet. Throws when the file does not parse. */
+const readHistory = async ($: EngineInterface, path: string): Promise<History> =>
+  (await $.fs.exists(path)) ? parseHistory(String(await $.fs.read(path))) : EMPTY_HISTORY
+
+/**
+ * Adds one checked prompt and its fixes to the history file. Read and written in one go, never from a copy in memory,
+ * so two sessions at once lose at most the entry of a check that lands in the same moment; a file torn by such a
+ * moment keeps the lines that still parse (parseHistory) and is whole again after this write.
+ */
+const keep = async ($: EngineInterface, fixes: readonly GrammarFix[]) => {
+  const path = await historyFile($)
+  if (path === undefined) {
+    return
+  }
+  let h: History
+  try {
+    h = await readHistory($, path)
+  } catch (err) {
+    toastOnce($, `grammar: ${path} does not parse (${message(err)}), so no fixes are kept while it doesn't. /grammar history clear starts it over.`)
+    return
+  }
+  await $.fs.write(path, historyText(record(h, fixes, await $.clock.now())))
+}
+
+// This session's history writes (each check's, and a clear), one after another, so none undoes another.
+let writing: Promise<unknown> = Promise.resolve()
+
+const inTurn = <T,>(write: () => Promise<T>): Promise<T> => {
+  const next = writing.then(write)
+  writing = next.catch(() => undefined)
+  return next
+}
+
+const keepInTurn = ($: EngineInterface, fixes: readonly GrammarFix[]) =>
+  inTurn(() => keep($, fixes)).catch(err => toastOnce($, `grammar: no fixes kept: ${message(err)}`))
+
+/**
+ * Once, at the start of a session that will keep fixes but has no history file yet: says where they will go. Not in a
+ * project that keeps none, and never again after it has shown.
+ */
+const announceHistory = async ($: EngineInterface) => {
+  const path = await historyFile($)
+  if (path === undefined || (await $.store.get(STORE_ANNOUNCED)) === true || (await $.fs.exists(path))) {
+    return
+  }
+  if (!(await loadLists($).catch(() => EMPTY)).history) {
+    return
+  }
+  toastOnce($, `grammar: your fixes will be kept in ${path} for /grammar stats and /grammar review. /grammar history off stops it.`, 12000)
+  await $.store.set(STORE_ANNOUNCED, true)
 }
 
 /** The global and project lists, joined. */
@@ -210,10 +222,10 @@ const migrate = async ($: EngineInterface) => {
   return moved
 }
 
-const ask = async ($: EngineInterface, s: Settings, text: string, natural: boolean, ignore: Ignore) => {
+const ask = async ($: EngineInterface, s: Settings, text: string, natural: boolean, kind: boolean, ignore: Ignore) => {
   const request = {
     model: s.model,
-    system: system({ natural, dialect: s.dialect, showWhy: s.showWhy, ignore: ignore.words }),
+    system: system({ natural, dialect: s.dialect, showWhy: s.showWhy, kind, ignore: ignore.words }),
     prompt: cut(text, s.maxChars),
     maxTokens: 4096,
     effort: s.effort,
@@ -236,7 +248,8 @@ const run = async ($: EngineInterface, s: Settings, id: number, text: string) =>
     return
   }
   const ignore = compileIgnore(lists.ignore)
-  const r = await ask($, s, text, await read($, isNatural), ignore)
+  const history = lists.history && (await read($, keepsHistory))
+  const r = await ask($, s, text, await read($, isNatural), history, ignore)
   let result: GrammarCheck | null
   if (!r.isAnswered) {
     result = { id, text, status: 'error', fixes: [], error: r.reason }
@@ -259,6 +272,10 @@ const run = async ($: EngineInterface, s: Settings, id: number, text: string) =>
   const final = result
   // Not English: the pending check goes, so the row shows nothing.
   await update($, checks, all => all.flatMap(c => (c.id !== id ? [c] : final === null ? [] : [final])))
+  // English that was checked counts toward the history, clean or not; the line is drawn first.
+  if (history && final?.status === 'done') {
+    await keepInTurn($, final.fixes)
+  }
 }
 
 /** Queues a check of a prompt you typed, unless it is off, paused, too short, or nothing would show it. */
@@ -292,6 +309,9 @@ const USAGE = `/grammar help: this list, and what is on now
 /grammar ignore add <words>: never flag these (phrases: separate with commas)
 /grammar ignore rm <words>: flag them again
 /grammar ignore: the ignore and skip lists, and their files
+/grammar stats [7d|30d|since 2026-10-01]: your most frequent mistakes, from the kept fixes
+/grammar review [7d|30d|since 2026-10-01]: a summary, then advice on them from Sonnet (one call, from ${REVIEW_FROM} fixes)
+/grammar history [on|off|clear]: keeping fixes for stats and review
 More settings (model, spelling, minimum words, icons) are under /config.`
 
 /** Adds or removes entries in the global grammar.json, keeping whatever else the file holds. */
@@ -329,6 +349,116 @@ const showLists = async ($: EngineInterface) => {
   return lines.join('\n')
 }
 
+/** The kept fixes the ignore list leaves, and the history; a message instead when there is no file or it does not parse. */
+const loadHistory = async ($: EngineInterface): Promise<{ path: string; h: History; ignore: Ignore } | string> => {
+  const path = await historyFile($)
+  if (path === undefined) {
+    return 'No home folder to keep the history in.'
+  }
+  try {
+    const h = await readHistory($, path)
+    const lists = await loadLists($).catch(() => EMPTY)
+    return { path, h, ignore: compileIgnore(lists.ignore) }
+  } catch (err) {
+    return `${path} does not parse (${message(err)}). Fix it by hand, or /grammar history clear to start over.`
+  }
+}
+
+// API errors that mean this model is not available here (a provider without Sonnet, an org that excludes it). A login
+// that fails fails for every model, so it is not one of them.
+const UNAVAILABLE: ReadonlySet<ModelApiError> = new Set<ModelApiError>(['model_not_found', 'oauth_org_not_allowed'])
+
+/** One model call over the period's grouped fixes: Sonnet, else the check's own model when Sonnet is not allowed. */
+const review = async ($: EngineInterface, s: Settings, words: string) => {
+  const loaded = await loadHistory($)
+  if (typeof loaded === 'string') {
+    return loaded
+  }
+  const now = await $.clock.now()
+  const period = parsePeriod(words, now)
+  if (typeof period === 'string') {
+    return period
+  }
+  const fixes = visible(within(loaded.h, period), loaded.ignore)
+  if (fixes.length < REVIEW_FROM) {
+    const longer = period.before === undefined ? '' : ' Try a longer period.'
+    return `Not enough to go on yet: ${fixes.length} fixes kept for ${period.label}, the review starts at ${REVIEW_FROM}.${longer} /grammar stats shows them so far.`
+  }
+  const summary = summaryOf(loaded.h, loaded.ignore, period, now)
+  const request = { system: REVIEW_SYSTEM, prompt: reviewInput(fixes), maxTokens: 8000, effort: 'medium' as const, timeoutMs: 180000 }
+  let refused = ''
+  for (const model of [...new Set(['sonnet', s.model])]) {
+    let r: Awaited<ReturnType<typeof $.model.complete>>
+    try {
+      r = await $.model.complete({ ...request, model })
+    } catch (err) {
+      // Refused before sending (a model the account may not use): try the next.
+      refused = `${model}: ${message(err)}`
+      continue
+    }
+    if (r.isAnswered) {
+      return shown($, summary, r.text.trim(), model)
+    }
+    const why = r.reason === 'api-error' ? `api-error (${r.status ?? 'no response'}, ${r.error})` : String(r.reason)
+    refused = `${model}: ${why}`
+    const unavailable = r.reason === 'api-error' && (r.status === 403 || r.status === 404 || UNAVAILABLE.has(r.error))
+    if (!unavailable) {
+      break
+    }
+  }
+  return `No review: ${refused}`
+}
+
+/** A review's row text (the summary, the advice, who wrote it), kept so the row can draw it as a panel. */
+const shown = async ($: EngineInterface, summary: Summary, advice: string, model: string) => {
+  const text = `${summaryText(summary)}\n\n${advice}\n\n(${model}, from ${summary.fixes} fixes)`
+  await update($, reviews, all => [{ text, summary, advice, model }, ...all].slice(0, 10))
+  return text
+}
+
+const historyCommand = async ($: EngineInterface, sub: string) => {
+  const path = await historyFile($)
+  if (sub === 'clear') {
+    if (path === undefined || !(await $.fs.exists(path))) {
+      return 'Nothing kept, nothing to clear.'
+    }
+    // In the write queue, so a check that read the file before the clear can't write its fixes back after it.
+    await inTurn(() => $.fs.write(path, historyText(EMPTY_HISTORY)))
+    return `Cleared: ${path} holds no fixes now.`
+  }
+  if (sub === 'on' || sub === 'off') {
+    const want = sub === 'on'
+    await update($, keepsHistory, () => want)
+    const why = await persist($, 'history', want)
+    const where = path ?? 'grammar-history.json'
+    return (
+      (want
+        ? `History on: each fix is kept in ${where} for /grammar stats and /grammar review.`
+        : `History off: no new fixes are kept. What ${where} holds stays; /grammar history clear empties it.`) + sessionOnly(why)
+    )
+  }
+  const loaded = await loadHistory($)
+  const on = await read($, keepsHistory)
+  if (typeof loaded === 'string') {
+    return `History: ${on ? 'on' : 'off'}. ${loaded}`
+  }
+  const project = await projectFile($).catch(() => undefined)
+  const projectAllows = project === undefined || (await readLists($, project)).history
+  return [
+    `History: ${on ? 'on' : 'off'}${on && !projectAllows ? ', but off in this project (its .claude/grammar.json says "history": false)' : ''}.`,
+    `${visible(loaded.h, loaded.ignore).length} fixes kept in ${loaded.path}: the last ${KEEP_DAYS} days, up to ${MAX_ENTRIES}.`,
+    '/grammar history on|off switches it; /grammar history clear empties the file.',
+  ].join('\n')
+}
+
+/** The help's history line: on or off, and how many fixes are kept. */
+const historyLine = async ($: EngineInterface) => {
+  const on = (await read($, keepsHistory)) ? 'on' : 'off'
+  const loaded = await loadHistory($).catch(() => 'unreadable')
+  const n = typeof loaded === 'string' ? 0 : visible(loaded.h, loaded.ignore).length
+  return `History: ${on}, ${n} fixes kept${n >= REVIEW_FROM ? '' : ` (/grammar review from ${REVIEW_FROM})`}.`
+}
+
 export const register: Register = (on, options) => {
   const s = settingsFrom(options)
   const ICON = s.icons ? NERD_ICONS : PLAIN_ICONS
@@ -337,10 +467,14 @@ export const register: Register = (on, options) => {
     const moved = await migrate($).catch(() => ({}) as Record<string, boolean>)
     await update($, isOn, () => moved.enabled ?? s.enabled)
     await update($, isNatural, () => moved.natural ?? s.natural)
+    await update($, keepsHistory, () => s.history)
+    if (s.history) {
+      await announceHistory($).catch(() => undefined)
+    }
     await $.command.register({
       name: 'grammar',
-      description: 'The English check of your prompts: /grammar on|off, /grammar natural on|off, /grammar ignore add|rm <words>, /grammar help',
-      argumentHint: '[help|on|off|natural|ignore]',
+      description: 'The English check of your prompts: /grammar on|off, /grammar stats, /grammar review, /grammar ignore add|rm <words>, /grammar help',
+      argumentHint: '[help|on|off|natural|ignore|stats|review|history]',
     })
 
     return next(e)
@@ -358,6 +492,7 @@ export const register: Register = (on, options) => {
         const now = [
           `Check: ${check}. Natural line: ${(await read($, isNatural)) ? 'on' : 'off'}.`,
           `Model: ${s.model}, effort ${s.effort}, spelling ${s.dialect}, at least ${s.minWords} words, up to ${s.maxChars} characters.`,
+          await historyLine($),
         ]
         return { text: `${now.join('\n')}\n\n${USAGE}` }
       }
@@ -374,6 +509,27 @@ export const register: Register = (on, options) => {
               ? 'Natural phrasing on: the check also says when a native speaker would put it differently.'
               : 'Natural phrasing off: grammar fixes only.') + sessionOnly(why),
         }
+      }
+      case 'stats': {
+        const loaded = await loadHistory($)
+        if (typeof loaded === 'string') {
+          return { text: loaded }
+        }
+        const words = rest.join(' ')
+        const now = await $.clock.now()
+        const period = parsePeriod(words, now)
+        if (typeof period === 'string') {
+          return { text: period }
+        }
+        return { text: statsText(loaded.h, loaded.ignore, now, loaded.path, await read($, keepsHistory), period, words) }
+      }
+      case 'review':
+        return { text: await review($, s, rest.join(' ')) }
+      case 'history': {
+        if (sub !== '' && sub !== 'on' && sub !== 'off' && sub !== 'clear') {
+          return { text: USAGE }
+        }
+        return { text: await historyCommand($, sub) }
       }
       case 'ignore': {
         const words = entriesFrom(rest.slice(1).join(' '))
@@ -409,6 +565,99 @@ export const register: Register = (on, options) => {
     await queue($, s, e).catch(() => undefined)
 
     return next(e)
+  })
+
+  // A review's row: the summary as a card, then the advice with each example drawn like a fix.
+  on('ui.render', { component: 'CommandOutput', props: { command: 'grammar' } }, async ($, e, next) => {
+    const row = await next(e)
+    const text = e.props.text.trim()
+    const r = (await read($, reviews)).find(x => text === x.text.trim() || text.endsWith(x.text.trim()))
+    if (r === undefined) {
+      return row
+    }
+    const { Box, Text } = $.ui.resolve(e)
+    const m = r.summary
+    const BAR = 15
+    const [full, empty] = s.icons ? ['█', '░'] : ['#', '.']
+    const most = Math.max(1, ...m.kinds.map(k => k.n))
+    const width = Math.max(0, ...m.kinds.slice(0, 3).map(k => k.kind.length))
+    const fix = (from: string, to: string, key: string) => (
+      <Text key={key}>
+        <Text color="error" strikethrough>
+          {from}
+        </Text>
+        <Text color="success">{` ${to === '' ? '(drop it)' : to}`}</Text>
+      </Text>
+    )
+    const card = (
+      <Box key="gr-panel" flexDirection="column" borderStyle="round" borderColor="suggestion" paddingX={1} alignSelf="flex-start">
+        <Text key="gr-p-title">
+          <Text bold>Grammar review</Text>
+          <Text dimColor>{` · ${m.label} (${m.range})`}</Text>
+        </Text>
+        <Text key="gr-p-counts">{`${m.checked} prompts · ${Math.round((100 * m.withFixes) / Math.max(1, m.checked))}% with a fix · ${m.fixes} fixes`}</Text>
+        {m.trend !== undefined && (
+          <Text key="gr-p-trend" color={m.trend.fewer === true ? 'success' : m.trend.fewer === false ? 'warning' : undefined}>
+            {`${m.trend.fewer === true ? '↓' : m.trend.fewer === false ? '↑' : '='} ${m.trend.text}`}
+          </Text>
+        )}
+        <Text key="gr-p-gap1"> </Text>
+        {m.kinds.slice(0, 3).map(k => {
+          const n = Math.max(1, Math.round((BAR * k.n) / most))
+          return (
+            <Text key={`gr-p-k-${k.kind}`}>
+              {`${k.kind.padEnd(width)} `}
+              <Text color="suggestion">{full.repeat(n)}</Text>
+              <Text dimColor>{empty.repeat(BAR - n)}</Text>
+              {`  ${Math.round(k.share * 100)}%`}
+            </Text>
+          )
+        })}
+        {m.top !== undefined && <Text key="gr-p-gap2"> </Text>}
+        {m.top !== undefined && (
+          <Text key="gr-p-top">
+            <Text dimColor>{'most repeated  '}</Text>
+            {fix(m.top.from, m.top.to, 'gr-p-top-fix')}
+            <Text dimColor>{`  ×${m.top.count}`}</Text>
+          </Text>
+        )}
+      </Box>
+    )
+    const advice = r.advice.split('\n').map((line, i) => {
+      const key = `gr-rule-${i}`
+      const example = /^\s*(.+?)\s+→\s+(.*?)\s*$/.exec(line)
+      if (/^\s*\d+[.)]\s/.test(line)) {
+        return (
+          <Text key={key} bold wrap="wrap">
+            {line.trim()}
+          </Text>
+        )
+      }
+      if (example !== null) {
+        return (
+          <Box key={key} paddingLeft={3}>
+            {fix(example[1] ?? '', example[2] ?? '', `${key}-fix`)}
+          </Box>
+        )
+      }
+      return (
+        <Text key={key} wrap="wrap">
+          {line.trim() === '' ? ' ' : line.trim()}
+        </Text>
+      )
+    })
+
+    return (
+      <Box key="grammar-review" flexDirection="column">
+        {card}
+        <Box key="gr-advice" flexDirection="column" marginTop={1}>
+          {advice}
+        </Box>
+        <Box key="gr-footer">
+          <Text dimColor>{`${r.model}, from ${m.fixes} fixes`}</Text>
+        </Box>
+      </Box>
+    )
   })
 
   // Under each prompt you typed: its fixes, then the natural rewrite. Nothing while checking or when clean.

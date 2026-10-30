@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Source of the README tour GIFs. Open it to play and scrub; record with bun docs/render-tour.ts. The GIFs live on the media branch. -->
+<title>Grammar Tour</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: the tour card at GitHub README width, a transport bar under it. The card has its own fixed palette (light or dark), like the cost card. */
+  :root {
+    --bg: #f3f4f7; --surface: #ffffff; --ink: #15171c; --muted: #5d6271; --line: #dfe2ea;
+    --accent: #4f5bd5; --accent-ink: #ffffff;
+    --ui: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0f1013; --surface: #18191e; --ink: #eef0f4; --muted: #9a9fac; --line: #2a2c35; --accent: #8b8fff; --accent-ink: #0f1013; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0f1013; --surface: #18191e; --ink: #eef0f4; --muted: #9a9fac; --line: #2a2c35; --accent: #8b8fff; --accent-ink: #0f1013; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--ui); }
+  .page { max-width: 878px; margin: 0 auto; padding-block: 36px 64px; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
+  @media (max-width: 500px) { .page { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); } }
+  h1 { font-size: 26px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  .lede { color: var(--muted); margin: 6px 0 20px; max-width: 64ch; }
+
+  .wrap { position: relative; width: 100%; max-width: 100%; aspect-ratio: 1200 / 750; }
+  .stage { position: absolute; top: 0; left: 0; width: 1200px; height: 750px; transform-origin: 0 0; transform: scale(var(--k, .69)); }
+
+  .controls { display: grid; grid-template-columns: auto 1fr auto; gap: 12px 14px; align-items: center; margin-top: 16px; }
+  .btn { font: 500 13px var(--ui); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+  .btn:focus-visible, .chips button:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #play { min-width: 76px; }
+  .time { font: 500 13px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); min-width: 0; }
+  .chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; }
+  .chips .scenes { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chips button { font: 500 13px var(--ui); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+  .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg { display: flex; gap: 4px; }
+  .notes { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); font-size: 14px; max-width: 70ch; }
+  .notes p { margin: 0 0 6px; }
+
+  /* ---------- the card ---------- */
+  .card {
+    --c-bg: #f7f7f5; --c-ink: #111214; --c-muted: #5c6068; --c-faint: #e4e4e0; --c-accent: #4f5bd5; --c-dot: #dcdcd8;
+    --t-bg: #18191d; --t-border: transparent; --t-shadow: 0 22px 44px -26px rgba(17,18,20,.55);
+    --t-ink: #e7e8ec; --t-dim: #8b909b; --t-err: #ff7a7a; --t-ok: #5fd38f; --t-sug: #b1b9f9; --t-pbg: #2a2b31; --t-hl: rgba(139,143,255,.16); --t-claude: #d97757;
+    --t-font: "JetBrains Mono", "SF Mono", Menlo, monospace;
+    position: absolute; inset: 0; border-radius: 22px; border: 1px solid var(--c-faint); background: var(--c-bg); color: var(--c-ink);
+    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    padding: 38px 48px 40px; display: flex; flex-direction: column; gap: 22px; overflow: hidden;
+  }
+  .card[data-card="dark"] { --c-bg: #131316; --c-ink: #f2f2f3; --c-muted: #9a9da5; --c-faint: #222226; --c-accent: #8b8fff; --c-dot: #2c2c33; --t-bg: #0c0c0f; --t-border: #26262c; --t-shadow: 0 22px 44px -26px rgba(0,0,0,.9); }
+  .card.capture { --t-font: "Hack Nerd Font Mono", "JetBrains Mono", Menlo, monospace; }
+
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 28px; height: 116px; flex: none; }
+  .kicker { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--c-muted); }
+  .title { font-size: 40px; font-weight: 650; letter-spacing: -.012em; margin-top: 6px; line-height: 1.1; white-space: nowrap; }
+  .title span { display: inline-block; white-space: pre; }
+  .sub { font-size: 18px; color: var(--c-muted); margin-top: 9px; max-width: 980px; line-height: 1.4; }
+  .dots { display: flex; gap: 7px; margin-top: 6px; flex: none; }
+  .dots i { position: relative; width: 9px; height: 9px; border-radius: 5px; background: var(--c-dot); display: block; overflow: hidden; }
+  .dots i.done { background: var(--c-accent); opacity: .55; }
+  .dots i.on { width: 34px; }
+  .dots i b { position: absolute; inset: 0 auto 0 0; background: var(--c-accent); }
+
+  .win { flex: 1; min-height: 0; border-radius: 12px; background: var(--t-bg); border: 1px solid var(--t-border); box-shadow: var(--t-shadow); display: flex; flex-direction: column; overflow: hidden; }
+  .bar { height: 34px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; position: relative; }
+  .bar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .bar i:nth-child(1) { background: #ff5f57 } .bar i:nth-child(2) { background: #febc2e } .bar i:nth-child(3) { background: #28c840 }
+  .bar b { position: absolute; inset: 0; display: grid; place-items: center; font: 500 13px var(--ui); color: var(--t-dim); }
+  .body { flex: 1; min-height: 0; padding: 8px 26px 14px; display: flex; flex-direction: column; font: 17px/1.5 var(--t-font); color: var(--t-ink); }
+  .k-panel { padding-left: 2ch; }
+  .rcard { display: inline-block; border: 1.5px solid var(--t-sug); border-radius: 8px; padding: calc(.5em - 1.5px) 1.2ch; margin-block: .25em; }
+  .rcard .ln { white-space: pre; }
+  .tx { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+  .tx-in { position: absolute; left: 0; right: 0; top: 0; }
+  .ln { white-space: pre-wrap; word-break: break-word; min-height: 1.5em; }
+  .gap { height: 1.5em; }
+  .k-prompt { background: var(--t-pbg); margin-inline: -10px; padding-inline: 10px; }
+  .k-gr, .k-nat { padding-left: 2ch; }
+  .k-out { padding-left: 5ch; }
+  .k-out.first { text-indent: -3ch; }
+  #hd { flex: 1; min-width: 0; }
+  .dim, .caret, .why, .sep { color: var(--t-dim); }
+  .b { font-weight: 600; }
+  .code, .ic { color: var(--t-sug); }
+  .good { color: var(--t-ok); }
+  .ok { color: var(--t-ok); }
+  .nat { color: var(--t-dim); font-style: italic; }
+  .err, .uline { background-image: linear-gradient(var(--t-err), var(--t-err)); background-repeat: no-repeat; }
+  .err { background-position: 0 56%; }
+  .uline { background-position: 0 100%; background-image: linear-gradient(rgba(255,122,122,.55), rgba(255,122,122,.55)); }
+  .hl { background-image: linear-gradient(var(--t-hl), var(--t-hl)); background-repeat: no-repeat; background-position: 0 0; margin-inline: -8px; padding-inline: 8px; border-radius: 4px; }
+  .k-out.hl { padding-left: calc(5ch + 8px); }
+  .k-nat.hl { padding-left: calc(2ch + 8px); }
+  .sp { color: var(--t-claude); display: inline-block; width: 1ch; }
+  .spl { color: var(--t-claude); }
+  .cur { display: inline-block; width: .6em; height: 1.15em; vertical-align: -.2em; background: var(--t-ink); }
+  .input { flex: none; padding-top: 8px; }
+  .rule { border-top: 1px solid #4a4c54; }
+  .iline { padding: 3px 0; min-height: 1.5em; white-space: pre; overflow: hidden; }
+  .hint { color: var(--t-dim); padding-left: 2ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 4px; }
+  .hint .m { color: var(--t-sug); }
+</style>
+
+<div class="page">
+  <h1>Grammar Tour</h1>
+  <p class="lede">Style 1, animated: the prompt gets typed, each mistake is struck through as the check comes back, and the fix lands next to it. Six scenes, about 50 seconds, drawn at the width GitHub shows a README GIF.</p>
+
+  <div class="wrap" id="wrap"><div class="stage" id="stage"></div></div>
+
+  <div class="controls">
+    <button class="btn" id="play" type="button">Pause</button>
+    <input type="range" id="scrub" min="0" max="100" step="0.01" value="0" aria-label="Position in the tour">
+    <span class="time" id="time">0.0 s</span>
+    <div class="chips">
+      <div class="scenes" id="scenes" role="group" aria-label="Scenes"></div>
+      <div class="seg" role="group" aria-label="Card colors"><button type="button" data-card="light">Light card</button><button type="button" data-card="dark">Dark card</button></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <p>The final GIF is recorded from this page frame by frame, in both card colors, so the README can show the dark one to dark-mode readers.</p>
+    <p>The ✎ and ✦ icons stand in for the Nerd Font glyphs; the recording uses the real ones in Hack Nerd Font, as in the plugin.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  // Recording reads its settings from the hash, comma-separated: #capture,t=6.0,card=dark
+  const params = new URLSearchParams(location.hash.startsWith('#capture') ? location.hash.slice(1).replace(/,/g, '&') : '');
+  const CAPTURE = params.has('capture');
+  const ICON = CAPTURE ? { logo: '', natural: '' } : { logo: '✎', natural: '✦' };
+
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const clamp = x => Math.max(0, Math.min(1, x));
+  const ease = x => 1 - Math.pow(1 - x, 3);
+  const pr = (lt, t0, d) => ease(clamp((lt - t0) / d));
+  const typed = (s, lt, t0, cps) => s.slice(0, Math.max(0, Math.floor((lt - t0) * cps)));
+  const f3 = x => x.toFixed(3);
+
+  // A line that rises in at t0; nothing before it.
+  const L = (lt, t0, html, cls = '', extra = '') => {
+    if (lt < t0) return '';
+    const e = pr(lt, t0, .28);
+    return `<div class="ln ${cls}" style="opacity:${f3(e)};transform:translateY(${((1 - e) * 7).toFixed(2)}px);${extra}">${html}</div>`;
+  };
+  const hl = (lt, t0) => lt < t0 ? '' : `background-size:${f3(pr(lt, t0, .55) * 100)}% 100%`;
+  const gap = (lt, t0) => lt < t0 ? '' : '<div class="gap"></div>';
+
+  // Text segments: strings or [class, text]; cut to n characters for streaming.
+  const segs = (list, n = Infinity) => {
+    let out = '', left = n;
+    for (const s of list) {
+      if (left <= 0) break;
+      const [cls, text] = typeof s === 'string' ? ['', s] : s;
+      const part = text.slice(0, left);
+      left -= part.length;
+      out += cls ? `<span class="${cls}">${esc(part)}</span>` : esc(part);
+    }
+    return out;
+  };
+  const stream = (list, lt, t0, cps) => segs(list, Math.floor((lt - t0) * cps));
+
+  // The prompt row; each mark underlines a mistake as its fix comes in.
+  const promptRow = (lt, t0, text, marks = []) => {
+    let html = esc(text);
+    for (const m of marks) {
+      if (lt < m.t) continue;
+      html = html.replace(esc(m.text), `<span class="uline" style="background-size:${f3(pr(lt, m.t, .35) * 100)}% 2px">${esc(m.text)}</span>`);
+    }
+    return L(lt, t0, `<span class="caret">❯</span> ${html}`, 'k-prompt');
+  };
+
+  // One fix: the words are struck through, then the fix (and the reason) come in.
+  const fixPart = (lt, ti, f) => {
+    const a = pr(lt, ti, .2), s = pr(lt, ti + .12, .36), o = pr(lt, ti + .44, .26), w = pr(lt, ti + .6, .3);
+    let html = `<span class="err" style="opacity:${f3(a)};background-size:${f3(s * 100)}% 2px;color:color-mix(in srgb, var(--t-err) ${f3(s * 100)}%, var(--t-ink))">${esc(f.from)}</span>`;
+    if (o > 0) html += `<span class="ok" style="opacity:${f3(o)}"> ${esc(f.to)}</span>`;
+    if (w > 0 && f.why) html += `<span class="why" style="opacity:${f3(w)}"> ${esc(f.why)}</span>`;
+    return html;
+  };
+  // The grammar line under a prompt.
+  const fixLine = (lt, t0, every, fixes) => {
+    if (lt < t0) return '';
+    let html = `<span class="ic">${ICON.logo}</span> `;
+    fixes.forEach((f, i) => {
+      const ti = t0 + i * every;
+      if (lt < ti) return;
+      if (i > 0) html += `<span class="sep" style="opacity:${f3(pr(lt, ti, .2))}">  · </span>`;
+      html += fixPart(lt, ti, f);
+    });
+    return L(lt, t0, html, 'k-gr');
+  };
+  const marksFor = (t0, every, fixes) => fixes.map((f, i) => ({ text: f.from, t: t0 + i * every + .12 }));
+
+  const SPIN = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
+  const spinner = (lt, t0, t1, label) => (lt < t0 || lt >= t1) ? '' :
+    L(lt, t0, `<span class="sp">${SPIN[Math.floor(lt * 9) % SPIN.length]}</span> <span class="spl">${esc(label)}…</span>`);
+  const out = (lt, t0, list, first = false, extra = '', cls = '') =>
+    L(lt, t0, (first ? `<span class="dim">⎿</span>  ` : '') + segs(list), `k-out ${first ? 'first ' : ''}${cls}`, extra);
+  const reply = (lt, t0, list, cps) => lt < t0 ? '' : L(lt, t0, `<span>●</span> ${stream(list, lt, t0, cps)}`);
+  const blinkOn = lt => Math.floor(lt * 1.8) % 2 === 0;
+
+  // Input box state while typing a prompt that is sent at `enter`.
+  const typing = (lt, text, t0, cps, enter) => lt >= enter
+    ? { text: '', caret: blinkOn(lt) }
+    : { text: typed(text, lt, t0, cps), caret: lt < t0 + text.length / cps + .1 || blinkOn(lt) };
+
+  const SCENES = [
+    {
+      kicker: 'Under every prompt', title: 'Your mistakes, fixed while Claude works', tab: 'Fixes',
+      sub: 'Haiku proofreads each prompt after you send it. The fixes show a few seconds later, right under it.',
+      dur: 9.2,
+      build(lt) {
+        const P = 'explain me in one sentence what is doing the /users endpoint when cache is empty';
+        const F = [
+          { from: 'explain me', to: 'explain to me', why: 'missing preposition' },
+          { from: 'what is doing the /users endpoint', to: 'what the /users endpoint is doing', why: 'wrong word order' },
+          { from: 'cache is empty', to: 'the cache is empty', why: 'missing article' },
+        ];
+        const E = 2.85, G = 3.7, EV = .8;
+        return {
+          input: typing(lt, P, .5, 40, E),
+          lines: promptRow(lt, E, P, marksFor(G, EV, F)) + fixLine(lt, G, EV, F) + gap(lt, 5.0) +
+            L(lt, 5.0, '<span class="dim">Read </span><span class="b">1</span><span class="dim"> file (ctrl+o to expand)</span>', '', 'padding-left:2ch') +
+            gap(lt, 6.4) + spinner(lt, 3.0, 6.4, 'Thinking') +
+            reply(lt, 6.4, ['When the cache is empty, ', ['code', '/users'], ' runs ', ['code', 'select id, name from users'], ', keeps the result for 30 seconds and returns it as JSON.'], 72),
+        };
+      },
+    },
+    {
+      kicker: 'The native-speaker line', title: 'How a native speaker would say it', tab: 'Native line',
+      sub: 'When a sentence still sounds off with the grammar fixed, a second line shows the natural way to say it.',
+      dur: 7.6,
+      build(lt) {
+        const P = 'can you make that the tests are running more fast on CI, they take forever';
+        const F = [{ from: 'more fast', to: 'faster', why: 'comparative of a short adjective' }];
+        const NAT = 'Can you make the tests run faster on CI? They take forever.';
+        const E = 2.45, G = 3.1;
+        const nat = lt < 3.9 ? '' : L(lt, 3.9, `<span class="ic">${ICON.natural}</span> <span class="nat">${esc(typed(NAT, lt, 3.9, 48))}</span>`, 'k-nat hl', hl(lt, 5.25));
+        return {
+          input: typing(lt, P, .5, 44, E),
+          lines: promptRow(lt, E, P, marksFor(G, 0, F)) + fixLine(lt, G, 0, F) + nat +
+            gap(lt, 5.7) + spinner(lt, 2.6, 5.7, 'Thinking') +
+            reply(lt, 5.7, ['The e2e suite runs in one job. I\'ll shard it across 4 jobs in ', ['code', '.github/workflows/test.yml'], '.'], 72),
+        };
+      },
+    },
+    {
+      kicker: '/grammar stats', title: 'The mistakes you make most', tab: 'Stats',
+      sub: 'Every fix is kept on your disk. Stats groups them by kind and shows whether you make fewer. No model call.',
+      dur: 7.6,
+      build(lt) {
+        const E = 1.35, t = i => 1.55 + i * .09;
+        // Same layout as statsText in hooks/history.ts.
+        const kind = (k, n, eg) => [`  ${k.padEnd(11)}  ${String(n).padStart(4)}  ${(Math.round(100 * n / 63) + '%').padStart(4)}  e.g. ${eg}`];
+        const rows = [
+          ['Everything kept (Sep 21 – Oct 30): 240 prompts checked, 100 with a fix (42%), 63 fixes kept.'],
+          [['good', 'Fewer than before'], ': 39% of prompts had a fix in the last 30 days, 50% in the 30 before.'],
+          [''],
+          ['By kind:'],
+          kind('article', 14, 'in separate module → in a separate module'),
+          kind('extra word', 14, 'should to move → should move'),
+          kind('preposition', 8, 'depend from → depend on'),
+          kind('wrong word', 7, 'make a research → do research'),
+          [''],
+          ['Repeated fixes:'],
+          ['  ×6   depend from → depend on'],
+          ['  ×5   explain me → explain to me'],
+          [''],
+          ['/grammar review: advice on these from Sonnet (one call).'],
+          [['dim', 'Kept in ~/.claude/grammar-history.json.']],
+        ];
+        const hls = { 1: 3.3, 10: 4.0 };
+        return {
+          input: { ...typing(lt, '/grammar stats', .4, 20, E), menu: lt < E },
+          lines: promptRow(lt, E, '/grammar stats') +
+            rows.map((r, i) => out(lt, t(i), r, i === 0, hls[i] ? hl(lt, hls[i]) : '', hls[i] ? 'hl' : '')).join(''),
+        };
+      },
+    },
+    {
+      kicker: '/grammar review', title: 'Rules written for you', tab: 'Review',
+      sub: 'A summary of the period, then Sonnet names the habits behind your mistakes, using your own fixes.',
+      dur: 10.4,
+      build(lt) {
+        const C = '/grammar review 30d', E = 1.5, CARD = 3.0, ADV = 5.3;
+        // The panel drawn by the CommandOutput hook in hooks/grammar.tsx.
+        const bar = (n, t0) => {
+          const shown = Math.round(n * pr(lt, t0, .7));
+          return `<span class="code">${'█'.repeat(shown)}</span><span class="dim">${'░'.repeat(15 - shown)}</span>`;
+        };
+        const kinds = [['article', 11, 15, '23%'], ['extra word', 10, 14, '21%'], ['preposition', 7, 10, '15%']];
+        const c = i => CARD + .15 + i * .09;
+        const card = lt < CARD ? '' : `<div class="rcard" style="opacity:${f3(pr(lt, CARD, .3))}">` +
+          L(lt, c(0), '<span class="b">Grammar review</span><span class="dim"> · last 30 days (Oct 1 – Oct 30)</span>') +
+          L(lt, c(1), '180 prompts · 39% with a fix · 48 fixes') +
+          L(lt, c(2), '<span class="good">↓ Fewer than the 30 days before (50%)</span>') +
+          L(lt, c(3), ' ') +
+          kinds.map(([k, , n, p], i) => L(lt, c(4 + i), `${esc(k.padEnd(11))} ${bar(n, c(4 + i) + .1)}  ${p}`)).join('') +
+          L(lt, c(7), ' ') +
+          L(lt, c(8), `<span class="dim">most repeated  </span>${lt >= c(8) ? fixPart(lt, c(8) + .2, { from: 'depend from', to: 'depend on' }) : ''}<span class="dim">  ×5</span>`) +
+          '</div>';
+        const advice = [
+          ['1. Dropping "a" or "the" before a singular noun: a singular countable noun almost always needs one.'],
+          [{ from: 'in separate module', to: 'in a separate module' }],
+          [{ from: 'check file', to: 'check the file' }],
+          ['2. Putting "to" after should, must and can: they take the plain verb.'],
+          [{ from: 'should to move', to: 'should move' }],
+          [{ from: 'must to check', to: 'must check' }],
+          ['3. Translating prepositions word for word: learn each verb with its preposition.'],
+          [{ from: 'depend from', to: 'depend on' }],
+        ];
+        const a = i => ADV + i * .32;
+        return {
+          input: { ...typing(lt, C, .4, 22, E), menu: lt < E },
+          lines: promptRow(lt, E, C) + spinner(lt, 1.65, CARD, 'Asking Sonnet') +
+            (lt < CARD ? '' : `<div class="k-panel">${card}${gap(lt, ADV)}` +
+              advice.map(([x], i) => typeof x === 'string'
+                ? L(lt, a(i), `<span class="b">${esc(x)}</span>`)
+                : L(lt, a(i), fixPart(lt, a(i), x), '', 'padding-left:3ch')).join('') +
+              L(lt, a(advice.length) + .1, '<span class="dim">sonnet, from 48 fixes</span>') + '</div>'),
+        };
+      },
+    },
+    {
+      kicker: 'Ignore list and settings', title: 'Your jargon stays unflagged', tab: 'Ignore',
+      sub: 'Add your terms to the ignore list, skip prompts by pattern, and tune the model, spelling and limits under /config.',
+      dur: 7.6,
+      build(lt) {
+        const A = '/grammar ignore add pull request, kubectl', H = '/grammar help';
+        const E1 = 1.9, E2 = 3.75, t = i => 3.9 + i * .1;
+        // The top of /grammar help: what is on now, then the start of the command list.
+        const help = [
+          ['Check: on. Natural line: on.'],
+          ['Model: haiku, effort low, spelling any, at least 2 words, up to 6000 characters.'],
+          ['History: on, 63 fixes kept.'],
+          [''],
+          ['/grammar help: this list, and what is on now'],
+          ['/grammar [on|off]: the English check of your prompts'],
+          ['/grammar natural [on|off]: the native-speaker line'],
+          ['/grammar ignore add <words>: never flag these (phrases: separate with commas)'],
+          ['/grammar ignore rm <words>: flag them again'],
+        ];
+        const input = lt < E1 ? { ...typing(lt, A, .4, 32, E1), menu: true } : { ...typing(lt, H, 2.9, 20, E2), menu: lt < E2 && lt >= 2.9 };
+        return {
+          input,
+          lines: promptRow(lt, E1, A) + out(lt, 2.05, ['Never flagged now: "pull request", "kubectl". Kept in ~/.claude/grammar.json.'], true, hl(lt, 2.4), 'hl') +
+            gap(lt, E2) + promptRow(lt, E2, H) + help.map((r, i) => out(lt, t(i), r, i === 0)).join(''),
+        };
+      },
+    },
+    {
+      kicker: 'Import past prompts', title: 'Start with the prompts you already wrote', tab: 'Import',
+      sub: 'One script checks the prompts from your past sessions and fills your history. A month costs about 2 cents.',
+      dur: 7.2, shell: true,
+      build(lt) {
+        const C = 'bun tools/import-history.ts --days 30';
+        const E = 1.95;
+        const cmd = `<span class="dim">$</span> ${esc(typed(C, .5 <= lt ? lt : 0, .5, 30))}${lt < E && (lt < 1.8 || blinkOn(lt)) ? '<span class="cur"></span>' : ''}`;
+        const k = Math.max(1, Math.min(10, Math.floor((lt - 2.35) / 1.25 * 10) + 1));
+        return {
+          input: null,
+          lines: L(lt, 0, cmd) +
+            L(lt, 2.1, segs(['195 prompts typed from 2026-10-01 to now (UTC) in ~/.claude; 10 calls to haiku.'])) +
+            L(lt, 2.35, segs([['dim', `  ${k}/10 calls`]])) +
+            L(lt, 3.8, segs(['188 prompts in English checked, 81 with a fix, 112 fixes kept; 7 not in English. Cost about $0.021.']), 'hl', hl(lt, 4.3)) +
+            L(lt, 4.0, segs(['Written to ~/.claude/grammar-history.json. /grammar stats shows them.'])) +
+            gap(lt, 4.3) + L(lt, 4.3, `<span class="dim">$</span> ${blinkOn(lt) ? '<span class="cur"></span>' : ''}`),
+        };
+      },
+    },
+  ];
+  const STARTS = []; let TOTAL = 0;
+  for (const s of SCENES) { STARTS.push(TOTAL); TOTAL += s.dur; }
+
+  const stage = document.getElementById('stage');
+  stage.innerHTML = `<div class="card${CAPTURE ? ' capture' : ''}" id="card">
+    <div class="head"><div id="hd"></div><div class="dots" id="dots"></div></div>
+    <div class="win"><div class="bar"><i></i><i></i><i></i><b id="wt"></b></div>
+      <div class="body"><div class="tx"><div class="tx-in" id="tx"></div></div><div class="input" id="in"></div></div></div></div>`;
+  const card = document.getElementById('card'), hd = document.getElementById('hd'), dots = document.getElementById('dots');
+  const tx = document.getElementById('tx'), inp = document.getElementById('in'), wt = document.getElementById('wt');
+
+  const header = (sc, lt) => {
+    const words = sc.title.split(' ');
+    const outP = pr(lt, sc.dur - .45, .45);
+    const title = words.map((w, i) => {
+      const e = pr(lt, .05 + i * .045, .5);
+      return `<span style="opacity:${f3(e)};transform:translateY(${((1 - e) * 16).toFixed(2)}px);filter:blur(${((1 - e) * 5).toFixed(2)}px)">${esc(w)}${i < words.length - 1 ? ' ' : ''}</span>`;
+    }).join('');
+    const k = pr(lt, 0, .35), s = pr(lt, .3, .5);
+    return `<div style="opacity:${f3(1 - outP)};transform:translateY(${(-outP * 10).toFixed(2)}px)">
+      <div class="kicker" style="opacity:${f3(k)}">${esc(sc.kicker)}</div><div class="title">${title}</div>
+      <div class="sub" style="opacity:${f3(s)};transform:translateY(${((1 - s) * 6).toFixed(2)}px)">${esc(sc.sub)}</div></div>`;
+  };
+
+  let lastWin = '';
+  const renderAt = T => {
+    T = ((T % TOTAL) + TOTAL) % TOTAL;
+    let idx = 0;
+    while (idx < SCENES.length - 1 && T >= STARTS[idx + 1]) idx++;
+    const sc = SCENES[idx], lt = T - STARTS[idx];
+    hd.innerHTML = header(sc, lt);
+    dots.innerHTML = SCENES.map((_, j) => j === idx
+      ? `<i class="on"><b style="width:${f3(clamp(lt / sc.dur) * 100)}%"></b></i>`
+      : `<i class="${j < idx ? 'done' : ''}"></i>`).join('');
+    const title = sc.shell ? '~/claude-grammar — zsh' : '~/my-api — claude';
+    if (title !== lastWin) { wt.textContent = title; lastWin = title; }
+
+    const st = sc.build(lt);
+    const fade = 1 - pr(lt, sc.dur - .45, .45);
+    // Scroll to keep the newest line in view, smoothed by averaging how far it had to scroll over the last 0.4 s.
+    const box = tx.parentElement.clientHeight;
+    const need = x => { tx.innerHTML = sc.build(Math.max(0, x)).lines; return Math.max(0, tx.scrollHeight - box); };
+    let off = need(lt);
+    if (off > 0) {
+      const N = 8;
+      for (let k = 1; k <= N; k++) off += need(lt - k * .05);
+      off /= N + 1;
+      tx.innerHTML = st.lines;
+    }
+    tx.style.opacity = f3(fade);
+    tx.style.transform = `translateY(${(-off).toFixed(1)}px)`;
+    if (st.input) {
+      inp.hidden = false;
+      const menu = st.input.menu && st.input.text.startsWith('/')
+        ? `<span class="m">/grammar</span>   The English check of your prompts: /grammar on|off, /grammar stats, /grammar review, /grammar ignore add|rm`
+        : '? for shortcuts';
+      inp.innerHTML = `<div class="rule"></div><div class="iline"><span class="caret">❯</span> ${esc(st.input.text)}${st.input.caret ? '<span class="cur"></span>' : ''}</div><div class="rule"></div><div class="hint">${menu}</div>`;
+    } else {
+      inp.hidden = true;
+    }
+    return idx;
+  };
+  window.renderAt = renderAt;
+  window.TOUR = { total: TOTAL, starts: STARTS };
+  window.setCard = c => { card.dataset.card = c; };
+
+  if (CAPTURE) {
+    document.querySelector('.page').replaceWith(stage);
+    // The page color around the card's round corners: GitHub's, light or dark, passed as bg=ffffff.
+    const bg = /^[0-9a-f]{6}$/i.test(params.get('bg') || '') ? `#${params.get('bg')}` : '#ffffff';
+    document.documentElement.style.background = bg;
+    document.body.style.cssText = `margin:0;background:${bg}`;
+    stage.style.transform = 'none';
+    window.setCard(params.get('card') || 'light');
+    renderAt(+params.get('t') || 0);
+    // Lay out again once the fonts are in: line wrapping, and so the scroll, depend on them.
+    document.fonts.ready.then(() => { renderAt(+params.get('t') || 0); document.body.dataset.ready = '1'; });
+    return;
+  }
+
+  // ---------- preview controls ----------
+  const wrap = document.getElementById('wrap');
+  const fit = () => stage.style.setProperty('--k', wrap.clientWidth / 1200);
+  new ResizeObserver(fit).observe(wrap); fit();
+
+  const scrub = document.getElementById('scrub'), time = document.getElementById('time'), playBtn = document.getElementById('play');
+  const scenesEl = document.getElementById('scenes');
+  scrub.max = TOTAL.toFixed(2);
+  SCENES.forEach((s, j) => scenesEl.insertAdjacentHTML('beforeend', `<button type="button" data-j="${j}">${j + 1} · ${esc(s.tab)}</button>`));
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let t = reduce ? STARTS[0] + 8.9 : 0, playing = !reduce, last = performance.now(), shownIdx = -1;
+  const show = () => {
+    const idx = renderAt(t);
+    scrub.value = String(t % TOTAL);
+    time.textContent = `${(t % TOTAL).toFixed(1)} / ${TOTAL.toFixed(1)} s`;
+    if (idx !== shownIdx) { scenesEl.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.j === idx))); shownIdx = idx; }
+  };
+  const setPlaying = p => { playing = p; playBtn.textContent = p ? 'Pause' : 'Play'; last = performance.now(); };
+  setPlaying(playing);
+  const loop = now => { if (playing) { t = (t + (now - last) / 1000) % TOTAL; last = now; show(); } requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+  show();
+
+  playBtn.addEventListener('click', () => setPlaying(!playing));
+  scrub.addEventListener('input', () => { setPlaying(false); t = +scrub.value; show(); });
+  scenesEl.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; t = STARTS[+b.dataset.j]; setPlaying(true); show(); });
+
+  const segBtns = document.querySelectorAll('.seg button');
+  const pickCard = c => { window.setCard(c); segBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.card === c))); };
+  segBtns.forEach(b => b.addEventListener('click', () => pickCard(b.dataset.card)));
+  const rootTheme = document.documentElement.dataset.theme;
+  pickCard(rootTheme ? rootTheme : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  segBtns.forEach(b => b.classList.add('btn'));
+  document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); setPlaying(!playing); } });
+})();
+</script>

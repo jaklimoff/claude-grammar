@@ -3,18 +3,27 @@ import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
 import { applyFixes, compileIgnore, compileSkip, cut, entriesFrom, mergeLists, parseLists, settingsFrom, wordCount } from '../hooks/config'
-import { checkFor, keepFixes, parseReply, system, typedPart, usefulNatural } from '../hooks/grammar'
+import { BATCH, keepFixes, parseBatch, parseReply, system, typedPart } from '../hooks/check'
+import { checkFor, usefulNatural } from '../hooks/grammar'
+import { historyText, importWindow, keepable, kindOf, merge, pairsOf, parseHistory, parsePeriod, prune, record, reviewInput, statsText, summaryOf, trendOf, within } from '../hooks/history'
+import type { Period } from '../hooks/history'
+import type { Entry, History, Kind } from '../hooks/history'
+import { batches, typedText } from '../tools/transcript'
 
 const FIXES = {
   english: true,
   fixes: [
-    { from: 'appea', to: 'appear', why: 'typo' },
-    { from: 'about', to: 'above', why: 'wrong word' },
+    { from: 'appea', to: 'appear', why: 'typo', kind: 'spelling' },
+    { from: 'about', to: 'above', why: 'wrong word', kind: 'wrong word' },
   ],
 }
 
 const HOME_FILE = '/home/u/.claude/grammar.json'
 const PROJECT_FILE = '/work/app/.claude/grammar.json'
+const HISTORY_FILE = '/home/u/.claude/grammar-history.json'
+const DAY = 86_400_000
+// 2026-10-30, noon UTC.
+const NOW = Date.UTC(2026, 9, 30, 12)
 
 /** The transcript row of a prompt you typed. */
 const mountRow = ($: Engine, text: string, kind = 'composer') =>
@@ -25,8 +34,12 @@ const mountRow = ($: Engine, text: string, kind = 'composer') =>
     props: { text, origin: { kind }, isExpanded: false } as never,
   })
 
+// Set by a test whose disk writes should fail.
+let writeFails: string | undefined
+
 /** A home folder, a project and the files in them; returns the files, written ones included. */
 const disk = (on: On, initial: Record<string, string> = {}) => {
+  writeFails = undefined
   const files = new Map(Object.entries(initial))
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }) as never)
   on('session.root', () => ({ value: '/work/app' }) as never)
@@ -39,6 +52,9 @@ const disk = (on: On, initial: Record<string, string> = {}) => {
     return { value: text } as never
   })
   on('fs.write', ($, e) => {
+    if (writeFails !== undefined) {
+      throw new Error(writeFails)
+    }
     files.set(e.path, e.text)
     return { value: undefined } as never
   })
@@ -49,6 +65,11 @@ const disk = (on: On, initial: Record<string, string> = {}) => {
 const engine = (on: On, surfaces: string[] = ['terminal'], files: Record<string, string> = {}, stored: Record<string, unknown> = {}) => {
   mock.store(on, stored)
   const written = disk(on, files)
+  toasts.length = 0
+  on('ui.toast', ($, e) => {
+    toasts.push((e as { text: string }).text)
+    return { value: undefined } as never
+  })
   on('session.start', () => ({ cwd: '/work/app' }) as never)
   on('command.register', () => ({ value: { command: 'grammar' } }) as never)
   on('session.surfaces', () => ({ value: surfaces }) as never)
@@ -56,6 +77,9 @@ const engine = (on: On, surfaces: string[] = ['terminal'], files: Record<string,
   on('ui.render', () => ({ type: 'Box', props: { key: 'prompt' }, children: [] }) as never)
   return written
 }
+
+// The toasts of the running test.
+const toasts: string[] = []
 
 type Asked = { prompts: string[]; systems: string[]; models: string[]; files: Map<string, string> }
 
@@ -287,19 +311,15 @@ test('ignored words are told to the model and their fixes dropped; skipped promp
 
 test('a grammar.json that does not parse is reported once and the check goes on', async ($, on) => {
   const clock = mock.clock(on)
-  const toasts: string[] = []
-  on('ui.toast', ($, e) => {
-    toasts.push((e as { text: string }).text)
-    return { value: undefined } as never
-  })
   const asked = haiku(on, FIXES, undefined, { [HOME_FILE]: '{ "ignore": [' })
   await $.prompt.submit({ text: TYPO } as never)
   await clock.advance(5)
   await $.prompt.submit({ text: `${TYPO} again` } as never)
   await clock.advance(5)
   expect(asked.prompts.length).toBe(2)
-  expect(toasts.length).toBe(1)
-  expect(toasts[0]).toContain(HOME_FILE)
+  const broken = toasts.filter(t => t.includes('is ignored'))
+  expect(broken.length).toBe(1)
+  expect(broken[0]).toContain(HOME_FILE)
 })
 
 test('/grammar ignore add, rm and list edit the global file and keep the rest of it', async ($, on) => {
@@ -410,14 +430,493 @@ test('config helpers: settings, lists, words and cuts', () => {
     maxChars: 6000,
     icons: true,
     showWhy: true,
+    history: true,
   })
   expect(settingsFrom({ effort: 'max', max_chars: 5, dialect: 'au' })).toMatchObject({ effort: 'low', maxChars: 200, dialect: 'any' })
-  expect(parseLists('{"ignore": ["a", 3, ""], "other": 1}')).toEqual({ ignore: ['a'], skip: [] })
+  expect(parseLists('{"ignore": ["a", 3, ""], "other": 1}')).toEqual({ ignore: ['a'], skip: [], history: true })
+  expect(parseLists('{"history": false}').history).toBe(false)
   expect(() => parseLists('[]')).toThrow()
-  expect(mergeLists({ ignore: ['a'], skip: [] }, { ignore: ['a', 'b'], skip: ['x'] })).toEqual({ ignore: ['a', 'b'], skip: ['x'] })
+  expect(mergeLists({ ignore: ['a'], skip: [], history: true }, { ignore: ['a', 'b'], skip: ['x'], history: true })).toEqual({
+    ignore: ['a', 'b'],
+    skip: ['x'],
+    history: true,
+  })
+  expect(mergeLists({ ignore: [], skip: [], history: true }, { ignore: [], skip: [], history: false }).history).toBe(false)
   expect(compileSkip(['^ok$', '/(/', '/^Y/']).map(r => r.test('OK'))).toEqual([true, false])
   expect(wordCount("let's go, ok")).toBe(3)
   expect(cut('one two three four', 10)).toBe('one two')
   expect(entriesFrom('a b')).toEqual(['a', 'b'])
   expect(entriesFrom('pull request, pnpm')).toEqual(['pull request', 'pnpm'])
+})
+
+// The mistake history.
+
+const entry = (from: string, to: string, kind: Kind, at = NOW): Entry => ({ from, to, why: '', kind, at })
+
+/** A history of `n` copies of each fix, and a day with `checked` prompts. */
+const seeded = (fixes: [string, string, Kind, number][], checked = 40, withFixes = 20): History => ({
+  version: 1,
+  fixes: fixes.flatMap(([from, to, kind, n]) => Array.from({ length: n }, () => entry(from, to, kind))),
+  days: [{ day: '2026-10-30', checked, withFixes }],
+})
+
+test('each checked prompt is kept in the history with its fixes, and a session with no history yet says where', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const asked = haiku(on, (n: number) => (n === 1 ? FIXES : { english: true, fixes: [] }))
+  await $.session.start({} as never)
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  await $.prompt.submit({ text: 'looks good to me' } as never)
+  await clock.advance(5)
+  expect(asked.systems[0]).toContain('"kind"')
+  const h = parseHistory(asked.files.get(HISTORY_FILE) ?? '')
+  expect(h.fixes.map(f => [f.from, f.to, f.kind, f.at])).toEqual([
+    ['appea', 'appear', 'spelling', NOW + 1],
+    ['about', 'above', 'wrong word', NOW + 1],
+  ])
+  expect(h.days).toEqual([{ day: '2026-10-30', checked: 2, withFixes: 1 }])
+  const notes = toasts.filter(t => t.includes(HISTORY_FILE))
+  expect(notes.length).toBe(1)
+  expect(notes[0]).toContain('/grammar history off')
+  // Once the file is there, a new session says nothing.
+  await $.session.start({} as never)
+  expect(toasts.filter(t => t.includes(HISTORY_FILE)).length).toBe(1)
+})
+
+test('the history notice shows once ever, and not in a project that keeps nothing', async ($, on) => {
+  haiku(on, FIXES, undefined, { [PROJECT_FILE]: '{"history": false}' })
+  await $.session.start({} as never)
+  expect(toasts.filter(t => t.includes(HISTORY_FILE))).toEqual([])
+})
+
+test('the history notice does not come back when the file is deleted after it showed', async ($, on) => {
+  haiku(on, FIXES, undefined, {}, { 'grammar.historyAnnounced': true })
+  await $.session.start({} as never)
+  expect(toasts.filter(t => t.includes(HISTORY_FILE))).toEqual([])
+})
+
+test('two checks that finish together both land in the history', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const asked = haiku(on, FIXES)
+  await $.prompt.submit({ text: TYPO } as never)
+  await $.prompt.submit({ text: `${TYPO} again` } as never)
+  await clock.advance(5)
+  const h = parseHistory(asked.files.get(HISTORY_FILE) ?? '')
+  expect(h.days[0]?.checked).toBe(2)
+  expect(h.fixes.length).toBe(4)
+})
+
+test('a history write that fails says so once, and the fixes still show', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  haiku(on, FIXES)
+  writeFails = 'disk full'
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  await $.prompt.submit({ text: `${TYPO} again` } as never)
+  await clock.advance(5)
+  expect(toasts.filter(t => t.includes('no fixes kept')).length).toBe(1)
+  expect(await (await mountRow($, TYPO)).find({ key: 'gr-fixes' })).toBeDefined()
+})
+
+test('a history torn by two sessions keeps the lines that still parse, and the next check makes it whole', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const whole = historyText(seeded([['depend from', 'depend on', 'preposition', 2]]))
+  const torn = `${whole}  {"from": "half a li`
+  expect(parseHistory(torn).fixes.length).toBe(2)
+  expect(parseHistory(torn).days.length).toBe(1)
+  const asked = haiku(on, FIXES, undefined, { [HISTORY_FILE]: torn })
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  const h = parseHistory(asked.files.get(HISTORY_FILE) ?? '')
+  expect(h.fixes.length).toBe(4)
+  expect(JSON.parse(asked.files.get(HISTORY_FILE) ?? '').version).toBe(1)
+
+  // A write cut short among the fixes keeps the day counts, which come first, and the fixes before the cut.
+  const cut = whole.slice(0, whole.lastIndexOf('depend from') + 4)
+  expect(parseHistory(cut).days).toEqual([{ day: '2026-10-30', checked: 40, withFixes: 20 }])
+  expect(parseHistory(cut).fixes.length).toBe(1)
+})
+
+test('ignored words, failed checks and other languages are not kept', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  let reply: unknown = FIXES
+  const asked = haiku(on, () => reply, undefined, { [HOME_FILE]: JSON.stringify({ ignore: ['appea'] }) })
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  reply = 'sorry, no'
+  await $.prompt.submit({ text: 'another prompt here' } as never)
+  await clock.advance(5)
+  reply = { english: false, fixes: [] }
+  await $.prompt.submit({ text: 'das ist gut so' } as never)
+  await clock.advance(5)
+  const h = parseHistory(asked.files.get(HISTORY_FILE) ?? '')
+  expect(h.fixes.map(f => f.from)).toEqual(['about'])
+  expect(h.days[0]?.checked).toBe(1)
+})
+
+test('history off, in the settings or a project, keeps nothing and stops asking for the kind', { options: { history: false } }, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const asked = haiku(on, FIXES)
+  await $.session.start({} as never)
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(asked.files.has(HISTORY_FILE)).toBe(false)
+  expect(asked.systems[0]).not.toContain('"kind"')
+})
+
+test('a project whose grammar.json says "history": false keeps nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const asked = haiku(on, FIXES, undefined, { [PROJECT_FILE]: JSON.stringify({ history: false }) })
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(asked.files.has(HISTORY_FILE)).toBe(false)
+  expect(await (await mountRow($, TYPO)).find({ key: 'gr-fixes' })).toBeDefined()
+  const status = await $.command.run({ command: 'grammar', args: 'history' } as never)
+  expect(status.text).toContain('off in this project')
+})
+
+test('/grammar history off|on saves the setting, and clear empties the file', async ($, on) => {
+  const sets: unknown[] = []
+  on('config.set', ($, e) => {
+    sets.push({ key: e.key, value: e.value })
+    return { value: e.value } as never
+  })
+  const clock = mock.clock(on, { now: NOW })
+  const asked = haiku(on, FIXES, undefined, { [HISTORY_FILE]: historyText(seeded([['depend from', 'depend on', 'preposition', 3]])) })
+  const off = await $.command.run({ command: 'grammar', args: 'history off' } as never)
+  expect(off.text).toContain('History off')
+  expect(sets).toEqual([{ key: 'grammar.history', value: false }])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(parseHistory(asked.files.get(HISTORY_FILE) ?? '').fixes.length).toBe(3)
+
+  const cleared = await $.command.run({ command: 'grammar', args: 'history clear' } as never)
+  expect(cleared.text).toContain('Cleared')
+  expect(parseHistory(asked.files.get(HISTORY_FILE) ?? '')).toEqual({ version: 1, fixes: [], days: [] })
+  expect((await $.command.run({ command: 'grammar', args: 'history' } as never)).text).toContain('0 fixes kept')
+})
+
+test('a history file that does not parse is left alone and reported once', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const asked = haiku(on, FIXES, undefined, { [HISTORY_FILE]: '{ "fixes": [' })
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  await $.prompt.submit({ text: `${TYPO} again` } as never)
+  await clock.advance(5)
+  expect(asked.files.get(HISTORY_FILE)).toBe('{ "fixes": [')
+  expect(toasts.filter(t => t.includes('does not parse')).length).toBe(1)
+  // The check itself goes on.
+  expect(await (await mountRow($, TYPO)).find({ key: 'gr-fixes' })).toBeDefined()
+  expect((await $.command.run({ command: 'grammar', args: 'stats' } as never)).text).toContain('does not parse')
+})
+
+test('/grammar stats counts by kind and repeats, with nothing kept yet said plainly', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const files = engine(on)
+  expect((await $.command.run({ command: 'grammar', args: 'stats' } as never)).text).toContain('Nothing kept yet')
+  files.set(
+    HISTORY_FILE,
+    historyText(
+      seeded([
+        ['depend from', 'depend on', 'preposition', 3],
+        ['Depend  from', 'depend on', 'preposition', 2],
+        ['a file', 'the file', 'article', 2],
+        ['teh', 'the', 'spelling', 1],
+      ]),
+    ),
+  )
+  const stats = (await $.command.run({ command: 'grammar', args: 'stats' } as never)).text ?? ''
+  expect(stats).toContain('40 prompts checked, 20 with a fix (50%), 8 fixes kept')
+  expect(stats).toContain('preposition     5   63%  e.g. depend from → depend on')
+  expect(stats).toContain('×5   depend from → depend on')
+  expect(stats).not.toContain('×1')
+  expect(stats).toContain('advice from 20 fixes; 8 so far')
+  expect(stats).toContain(HISTORY_FILE)
+})
+
+test('/grammar review waits for enough fixes, then asks Sonnet once with the grouped fixes', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const asked = haiku(on, '1. You leave out "the".\n  a file → the file', undefined, {
+    [HISTORY_FILE]: historyText(seeded([['depend from', 'depend on', 'preposition', 12]])),
+    // Added to the ignore list after its fixes were kept: they no longer count.
+    [HOME_FILE]: JSON.stringify({ ignore: ['kubectl'] }),
+  })
+  const early = await $.command.run({ command: 'grammar', args: 'review' } as never)
+  expect(early.text).toContain('12 fixes kept for everything kept, the review starts at 20')
+  expect(asked.prompts.length).toBe(0)
+
+  asked.files.set(
+    HISTORY_FILE,
+    historyText(seeded([['depend from', 'depend on', 'preposition', 30], ['a file', 'the file', 'article', 25], ['kubectl', 'kubectl', 'other', 9]])),
+  )
+  const r = await $.command.run({ command: 'grammar', args: 'review' } as never)
+  expect(r.text).toContain('You leave out "the"')
+  expect(r.text).toContain('(sonnet, from 55 fixes)')
+  expect(asked.models).toEqual(['sonnet'])
+  expect(asked.prompts[0]).toContain('30× depend from → depend on (preposition)')
+  expect(asked.prompts[0]).toContain('25× a file → the file (article)')
+})
+
+test('/grammar review falls back when the API says Sonnet is not available, and stops on other errors', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const models: string[] = []
+  let [status, error] = [403, 'permission_denied']
+  on('model.complete', ($, e) => {
+    models.push(e.model)
+    if (e.model === 'sonnet') {
+      return { value: { isAnswered: false, reason: 'api-error', status, error, usage: { input_tokens: 0, output_tokens: 0 } } } as never
+    }
+    return { value: { isAnswered: true, text: '1. advice', usage: { input_tokens: 1, output_tokens: 1 } } } as never
+  })
+  engine(on, ['terminal'], { [HISTORY_FILE]: historyText(seeded([['depend from', 'depend on', 'preposition', 60]])) })
+  expect((await $.command.run({ command: 'grammar', args: 'review' } as never)).text).toContain('(haiku, from 60 fixes)')
+  expect(models).toEqual(['sonnet', 'haiku'])
+
+  // A missing model said by name, whatever the status, falls back too.
+  models.length = 0
+  ;[status, error] = [400, 'model_not_found']
+  expect((await $.command.run({ command: 'grammar', args: 'review' } as never)).text).toContain('(haiku, from 60 fixes)')
+  expect(models).toEqual(['sonnet', 'haiku'])
+
+  // An overload is not a missing model: no second call, and the reason is shown.
+  models.length = 0
+  ;[status, error] = [529, 'overloaded']
+  const r = await $.command.run({ command: 'grammar', args: 'review' } as never)
+  expect(models).toEqual(['sonnet'])
+  expect(r.text).toContain('sonnet: api-error (529, overloaded)')
+
+  // Nor is a failed login, which would fail for every model.
+  models.length = 0
+  ;[status, error] = [401, 'authentication_failed']
+  expect((await $.command.run({ command: 'grammar', args: 'review' } as never)).text).toContain('sonnet: api-error (401, authentication_failed)')
+  expect(models).toEqual(['sonnet'])
+})
+
+test('/grammar review falls back to the check\'s model when Sonnet is not allowed', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const models: string[] = []
+  on('model.complete', ($, e) => {
+    models.push(e.model)
+    if (e.model === 'sonnet') {
+      throw new Error('model not allowed')
+    }
+    return { value: { isAnswered: true, text: '1. advice', usage: { input_tokens: 1, output_tokens: 1 } } } as never
+  })
+  engine(on, ['terminal'], { [HISTORY_FILE]: historyText(seeded([['depend from', 'depend on', 'preposition', 60]])) })
+  const r = await $.command.run({ command: 'grammar', args: 'review' } as never)
+  expect(models).toEqual(['sonnet', 'haiku'])
+  expect(r.text).toContain('(haiku, from 60 fixes)')
+})
+
+test('history helpers: kinds, code, caps, trend and the file round trip', () => {
+  expect(kindOf('Word-Order')).toBe('word order')
+  expect(kindOf('vibes')).toBe('other')
+  expect(parseReply(JSON.stringify(FIXES))?.fixes[1]?.kind).toBe('wrong word')
+
+  const fix = (from: string, to = 'x') => ({ from, to, why: '' })
+  expect(keepable(fix('depend from'))).toBe(true)
+  for (const code of ['src/app', 'auth.ts', 'my_var', 'call()', '`x`', 'from .zshrc', 'a'.repeat(61)]) {
+    expect(keepable(fix(code))).toBe(false)
+  }
+
+  // Old fixes and days go; the newest 2000 stay.
+  const old: History = {
+    version: 1,
+    fixes: [entry('old one', 'x', 'other', NOW - 91 * DAY), ...Array.from({ length: 2000 }, (_, i) => entry(`w${i}`, 'x', 'other'))],
+    days: [{ day: '2026-07-01', checked: 5, withFixes: 5 }],
+  }
+  const next = record(old, [{ ...fix('new one'), kind: 'tense' }], NOW)
+  expect(next.fixes.length).toBe(2000)
+  expect(next.fixes[0]?.from).toBe('w1')
+  expect(next.fixes.at(-1)).toEqual({ from: 'new one', to: 'x', why: '', kind: 'tense', at: NOW })
+  expect(next.days).toEqual([{ day: '2026-10-30', checked: 1, withFixes: 1 }])
+  expect(parseHistory(historyText(next))).toEqual(next)
+  expect(parseHistory('{"fixes": [{"from": 1}], "days": "x"}')).toEqual({ version: 1, fixes: [], days: [] })
+  expect(() => parseHistory('[]')).toThrow()
+  // A time or count that is no number (1e999 reads as Infinity) drops its entry rather than break every command.
+  const odd = parseHistory('{"fixes": [{"from": "a", "to": "b", "at": 1e999}], "days": [{"day": "x", "checked": 1, "withFixes": 0}, {"day": "2026-10-30", "checked": 1e999, "withFixes": 0}]}')
+  expect(odd).toEqual({ version: 1, fixes: [], days: [] })
+
+  // Case alone is not a mistake: not kept, and one kept before is not counted.
+  expect(keepable(fix('Github', 'GitHub'))).toBe(false)
+  expect(keepable(fix('pull  request', 'pull request'))).toBe(false)
+  const cased = { version: 1 as const, fixes: [entry('Github', 'GitHub', 'spelling'), entry('teh', 'the', 'spelling')], days: [] }
+  expect(statsText(cased, compileIgnore([]), NOW, HISTORY_FILE, true)).toContain('1 fixes kept')
+
+  // Kept by calendar day: today and the 89 before, the same days "everything kept" covers.
+  const edge = prune({ version: 1, fixes: [entry('late', 'x', 'other', Date.UTC(2026, 7, 1, 23)), entry('early', 'x', 'other', Date.UTC(2026, 7, 2))], days: [] }, NOW)
+  expect(edge.fixes.map(f => f.from)).toEqual(['early'])
+  expect(within(edge, parsePeriod('', NOW) as Period).fixes.length).toBe(1)
+
+  // The trend needs 10 checks on each side.
+  const days = [
+    { day: '2026-09-10', checked: 20, withFixes: 10 },
+    { day: '2026-10-20', checked: 20, withFixes: 5 },
+  ]
+  expect(trendOf(days, NOW)).toEqual({ recent: 0.25, before: 0.5 })
+  expect(trendOf(days.slice(1), NOW)).toBeUndefined()
+  // The day exactly 30 days back belongs to the earlier window.
+  expect(trendOf([{ day: '2026-09-30', checked: 10, withFixes: 10 }, { day: '2026-10-01', checked: 10, withFixes: 0 }], NOW)).toEqual({ recent: 0, before: 1 })
+  const h = { version: 1 as const, fixes: [entry('a file', 'the file', 'article')], days }
+  expect(statsText(h, compileIgnore([]), NOW, HISTORY_FILE, true)).toContain('Fewer than before: 25% of prompts had a fix in the last 30 days, 50% in the 30 before.')
+  expect(statsText(h, compileIgnore(['a file']), NOW, HISTORY_FILE, true)).not.toContain('a file')
+  expect(reviewInput([entry('teh', '', 'extra word')])).toContain('1× teh → (drop it) (extra word)')
+
+  // A repeated fix takes the kind the model gave it most often.
+  const mixed = [entry('in post', 'in a post', 'missing word'), entry('in post', 'in a post', 'article'), entry('in post', 'in a post', 'article')]
+  expect(pairsOf(mixed)[0]?.kind).toBe('article')
+  expect(system({ natural: false })).toContain('article is a missing, extra or wrong a, an or the')
+  expect(system({ natural: false, kind: false })).not.toContain('article is a missing')
+})
+
+test('the import window covers the days of the same period and stops where the history begins', () => {
+  // NOW is 2026-10-30 12:00 UTC: 3 days are Oct 28, 29 and 30, as /grammar stats 3d counts them.
+  expect(importWindow(NOW, 3)).toEqual({ from: Date.UTC(2026, 9, 28), to: NOW })
+  // A second run after the first one's history starts on 10-28: nothing left, not a lost morning.
+  expect(importWindow(NOW, 3, '2026-10-28')).toBeUndefined()
+  expect(importWindow(NOW, 7, '2026-10-27')).toEqual({ from: Date.UTC(2026, 9, 24), to: Date.UTC(2026, 9, 27) })
+  // A history that starts today, from the plugin itself: the days before it, when the period reaches them.
+  expect(importWindow(NOW, 1, '2026-10-30')).toBeUndefined()
+  expect(importWindow(NOW, 2, '2026-10-30')).toEqual({ from: Date.UTC(2026, 9, 29), to: Date.UTC(2026, 9, 30) })
+})
+
+test('import helpers: a batch reply by id, and an import merged before the live history', () => {
+  const reply = parseBatch(
+    'Here: [{"id": 0, "english": true, "fixes": [{"from": "teh", "to": "the", "kind": "spelling"}]}, {"id": 1, "english": false, "fixes": []}, {"id": 2, "oops": 1}, {"text": "no id"}]',
+  )
+  expect(reply.get(0)?.fixes.map(f => [f.from, f.kind])).toEqual([['teh', 'spelling']])
+  expect(reply.get(1)).toBeNull()
+  // An answer without fixes is left out, so the tool counts that prompt as not checked.
+  expect(reply.has(2)).toBe(false)
+  expect(() => parseBatch('sorry')).toThrow()
+  expect(system({ natural: false }) + BATCH).toContain('"id"')
+  // A batch of one answered with a lone object, not an array: that object is the one answer.
+  expect(parseBatch('{"id": 7, "english": true, "fixes": [{"from": "teh", "to": "the"}]}').get(7)?.fixes.length).toBe(1)
+  expect(parseBatch('```json\n{"id": 3, "english": false, "fixes": []}\n```').get(3)).toBeNull()
+
+  // Transcript lines: only prompts you typed or queued, with their text, time and folder.
+  const line = (o: object) => JSON.stringify({ type: 'user', uuid: 'u1', timestamp: '2026-10-29T10:00:00.000Z', cwd: '/work/app', ...o })
+  expect(typedText(line({ promptSource: 'typed', message: { content: 'explain me this' } }))).toEqual({
+    text: 'explain me this',
+    at: Date.UTC(2026, 9, 29, 10),
+    cwd: '/work/app',
+    uuid: 'u1',
+  })
+  expect(typedText(line({ promptSource: 'queued', message: { content: [{ type: 'text', text: 'and ' }, { type: 'image' }, { type: 'text', text: 'this' }] } }))?.text).toBe('and this')
+  expect(typedText(line({ message: { content: '[Request interrupted by user]' } }))).toBeUndefined()
+  expect(typedText(line({ promptSource: 'typed', isSidechain: true, message: { content: 'x y' } }))).toBeUndefined()
+  expect(typedText(line({ promptSource: 'typed', isMeta: true, message: { content: 'x y' } }))).toBeUndefined()
+  expect(typedText('{"promptSource":"typed", torn')).toBeUndefined()
+  // Batches: 20 prompts or 8000 characters, whichever comes first; a longer prompt goes alone.
+  expect(batches(Array.from({ length: 45 }, () => ({ text: 'x' }))).map(b => b.length)).toEqual([20, 20, 5])
+  expect(batches([{ text: 'a'.repeat(5000) }, { text: 'b'.repeat(5000) }, { text: 'c'.repeat(9000) }, { text: 'd' }]).map(b => b.length)).toEqual([1, 1, 1, 1])
+
+  const old = record(record({ version: 1, fixes: [], days: [] }, [{ from: 'teh', to: 'the', why: '', kind: 'spelling' }], NOW - 3 * DAY), [], NOW - 3 * DAY)
+  const live = record({ version: 1, fixes: [], days: [] }, [{ from: 'a file', to: 'the file', why: '', kind: 'article' }], NOW)
+  const both = merge(live, old, NOW)
+  expect(both.fixes.map(f => f.from)).toEqual(['teh', 'a file'])
+  expect(both.days).toEqual([
+    { day: '2026-10-27', checked: 2, withFixes: 1 },
+    { day: '2026-10-30', checked: 1, withFixes: 1 },
+  ])
+  expect(merge(old, old, NOW).days[0]?.checked).toBe(4)
+})
+
+/** The output row of a /grammar command. */
+const mountOutput = ($: Engine, args: string, text: string) =>
+  $.ui.mount({
+    plugin: 'grammar',
+    surface: 'terminal',
+    component: 'CommandOutput',
+    props: { command: 'grammar', args, text, isErrored: false } as never,
+  })
+
+/** Fixes and day counts spread over the days before NOW: `perDay[i]` is [checked, withFixes, fixes] for i days ago. */
+const spread = (perDay: [number, number, [string, string, Kind][]][]): History => ({
+  version: 1,
+  fixes: perDay.flatMap(([, , fixes], i) => fixes.map(([from, to, kind]) => entry(from, to, kind, NOW - i * DAY))).sort((a, b) => a.at - b.at),
+  days: perDay
+    .map(([checked, withFixes], i) => ({ day: new Date(NOW - i * DAY).toISOString().slice(0, 10), checked, withFixes }))
+    .reverse(),
+})
+
+test('periods: days, a start date, everything kept, and what does not read', () => {
+  const week = parsePeriod('7d', NOW) as Period
+  expect(week).toEqual({
+    fromDay: '2026-10-24',
+    toDay: '2026-10-30',
+    label: 'last 7 days',
+    before: { fromDay: '2026-10-17', toDay: '2026-10-23', label: 'the 7 days before' },
+  })
+  expect(parsePeriod('1d', NOW)).toMatchObject({ label: 'today', before: { fromDay: '2026-10-29', label: 'yesterday' } })
+  // The stretch before is cut to the 90 days kept, and says so; past them there is none.
+  expect((parsePeriod('60d', NOW) as Period).before).toEqual({ fromDay: '2026-08-02', toDay: '2026-08-31', label: 'the 30 kept days before' })
+  expect(parsePeriod('90d', NOW)).not.toHaveProperty('before')
+  expect(parsePeriod('since 2026-01-01', NOW)).toMatchObject({ fromDay: '2026-08-02' })
+  expect(parsePeriod('since 2026-01-01', NOW)).not.toHaveProperty('before')
+  expect(parsePeriod('since 2026-10-28', NOW)).toMatchObject({ fromDay: '2026-10-28', label: 'since Oct 28', before: { fromDay: '2026-10-25', toDay: '2026-10-27' } })
+  expect(parsePeriod('', NOW)).toMatchObject({ fromDay: '2026-08-02', label: 'everything kept' })
+  expect(parsePeriod('', NOW)).not.toHaveProperty('before')
+  expect(parsePeriod('91d', NOW)).toContain('pick 1d to 90d')
+  expect(parsePeriod('since 2026-11-01', NOW)).toContain('not a day up to today')
+  expect(parsePeriod('since 2026-02-30', NOW)).toContain('not a day up to today')
+  expect(parsePeriod('last week', NOW)).toContain('7d, 30d')
+
+  // Eleven checks a day: the last 7 days against the 7 before them.
+  const h = spread(
+    Array.from({ length: 14 }, (_, i): [number, number, [string, string, Kind][]] =>
+      i < 7 ? [11, 3, [['a file', 'the file', 'article']]] : [11, 8, [['teh', 'the', 'spelling'], ['teh', 'the', 'spelling']]],
+    ),
+  )
+  expect(within(h, week).fixes.length).toBe(7)
+  const m = summaryOf(h, compileIgnore([]), week, NOW)
+  expect(m).toMatchObject({ label: 'last 7 days', range: 'Oct 24 – Oct 30', checked: 77, withFixes: 21, fixes: 7 })
+  expect(m.trend?.fewer).toBe(true)
+  expect(m.trend?.text).toBe('Fewer than the 7 days before (73%)')
+  expect(m.kinds).toEqual([{ kind: 'article', n: 7, share: 1 }])
+  expect(m.top).toMatchObject({ from: 'a file', to: 'the file', count: 7 })
+  // Everything kept starts where the data does.
+  expect(summaryOf(h, compileIgnore([]), parsePeriod('', NOW) as Period, NOW).range).toBe('Oct 17 – Oct 30')
+
+  const stats = statsText(h, compileIgnore([]), NOW, HISTORY_FILE, true, week, '7d')
+  expect(stats).toContain('Last 7 days (Oct 24 – Oct 30): 77 prompts checked, 21 with a fix (27%), 7 fixes kept.')
+  expect(stats).toContain('Fewer than the 7 days before (73%).')
+  expect(stats).not.toContain('teh')
+  expect(statsText(h, compileIgnore([]), NOW, HISTORY_FILE, true, parsePeriod('since 2026-10-30', NOW) as Period)).toContain('Since Oct 30 (Oct 30)')
+})
+
+test('/grammar review 7d reviews only that week and opens with a summary card', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const old = Array.from({ length: 30 }, () => entry('teh', 'the', 'spelling', NOW - 20 * DAY))
+  const week = Array.from({ length: 25 }, (_, i) => entry(i < 20 ? 'a file' : 'depend from', i < 20 ? 'the file' : 'depend on', i < 20 ? 'article' : 'preposition', NOW - DAY))
+  const h: History = { version: 1, fixes: [...old, ...week], days: [{ day: '2026-10-10', checked: 40, withFixes: 30 }, { day: '2026-10-29', checked: 50, withFixes: 20 }] }
+  const asked = haiku(on, '1. You leave out "the" before known things.\n  a file → the file\n  check file → check the file\n\n2. Prepositions after verbs.\n  depend from → depend on', undefined, {
+    [HISTORY_FILE]: historyText(h),
+  })
+  const r = await $.command.run({ command: 'grammar', args: 'review 7d' } as never)
+  expect(asked.prompts[0]).toContain('25 fixes.')
+  expect(asked.prompts[0]).not.toContain('teh')
+  const text = r.text ?? ''
+  expect(text.startsWith('Grammar review · last 7 days (Oct 24 – Oct 30)\n50 prompts · 40% with a fix · 25 fixes')).toBe(true)
+  expect(text).toContain('article 80% · preposition 20%')
+  expect(text).toContain('most repeated: a file → the file ×20')
+  expect(text).toContain('(sonnet, from 25 fixes)')
+
+  // Drawn: the card, the habits, each example struck through and fixed.
+  const row = await mountOutput($, 'review 7d', text)
+  const card = (await row.find({ key: 'gr-panel' }))?.text ?? ''
+  expect(card).toContain('Grammar review')
+  expect(card).toContain('50 prompts · 40% with a fix · 25 fixes')
+  expect(card).toContain('article')
+  expect(card).toContain('█')
+  const advice = (await row.find({ key: 'gr-advice' }))?.text ?? ''
+  expect(advice).toContain('1. You leave out "the" before known things.')
+  expect(advice).toContain('check file the file'.replace(' the', ' check the'))
+  expect(advice).not.toContain('→')
+  expect((await row.find({ key: 'gr-footer' }))?.text).toContain('sonnet, from 25 fixes')
+
+  // Other /grammar rows, and a period too short for a review, draw as plain text.
+  expect(await (await mountOutput($, 'help', 'Check: on.')).find({ key: 'gr-panel' })).toBeUndefined()
+  expect((await $.command.run({ command: 'grammar', args: 'review 1d' } as never)).text).toContain('Try a longer period')
+  expect((await $.command.run({ command: 'grammar', args: 'review someday' } as never)).text).toContain('7d, 30d')
 })

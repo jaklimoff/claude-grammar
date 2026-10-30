@@ -2,19 +2,26 @@
 //   git show <old tag>:hooks/grammar.tsx > /tmp/old.tsx
 //   bun docs/measure-cost.ts /tmp/old.tsx hooks/grammar.tsx <file with ANTHROPIC_API_KEY=...>
 //   ONLY=new bun docs/measure-cost.ts ...   (just the current prompt)
-// The new prompt is system({ natural: true }) with default settings; keep the regexes in step with hooks/grammar.tsx.
+// The new prompt is system({ natural: true }) with default settings; keep the regexes in step with hooks/check.ts and hooks/history.ts.
 import { readFileSync } from "node:fs";
 const [oldPath, newPath, envPath] = process.argv.slice(2) as [string, string, string];
 const grab = (src: string, re: RegExp) => src.match(re)![1]!;
 const oldSrc = readFileSync(oldPath, "utf8");
-const newSrc = readFileSync(newPath, "utf8");
+// The prompt is in check.ts beside the given file, the kinds in history.ts.
+const newSrc = ["check.ts", "history.ts"].map(f => readFileSync(newPath.replace(/[^/]+$/, f), "utf8")).join("\n");
 const oldSystem = ["BASE", "ANSWER", "NATURAL"].map(n => grab(oldSrc, new RegExp(`const ${n} = \`([\\s\\S]*?)\``))).join("\n");
 // New: system({ natural: true }) with the defaults: dialect any, why shown, no ignore words.
-const answer = grab(newSrc, /const answer = \(showWhy: boolean\) => `([\s\S]*?)`\n/).replace(/\$\{showWhy \? '([^']*)' : ''\}/, "$1");
+// The kind of each fix is asked for while the history is on, the default.
+const kinds = grab(newSrc, /export const KINDS = \[([\s\S]*?)\] as const/).match(/'([^']*)'/g)!.map(k => k.slice(1, -1)).join(", ");
+const kindField = grab(newSrc, /const KIND = `([^`]*)`/).replace("${KINDS.join(', ')}", kinds);
+const answer = grab(newSrc, /const answer = \(showWhy: boolean, kind: boolean\) => `([\s\S]*?)`\n/)
+  .replace(/\$\{showWhy \? '([^']*)' : ''\}/, "$1")
+  .replace("${kind ? KIND : ''}", kindField);
 const newSystem = [
   grab(newSrc, /const BASE = `([\s\S]*?)`/),
   grab(newSrc, /any: '([^']*)'/),
   answer,
+  grab(newSrc, /const KIND_RULE = `([^`]*)`/),
   grab(newSrc, /const NATURAL = `([\s\S]*?)`/),
 ].join("\n");
 const key = readFileSync(envPath, "utf8").match(/ANTHROPIC_API_KEY=(.*)/)![1]!.trim().replace(/^["']|["']$/g, "");

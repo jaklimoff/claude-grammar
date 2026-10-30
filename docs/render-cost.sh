@@ -2,7 +2,7 @@
 # Renders the cost card from docs/cost-card.html with headless Chrome.
 #   docs/render-cost.sh          -> cost-light.png, cost-dark.png (Anthropic-like colors)
 #   docs/render-cost.sh brand    -> cost-brand-light.png, cost-brand-dark.png (jack.direct colors, transparent corners)
-# The PNGs live on the media branch, next to demo.gif.
+# The PNGs live on the media branch, next to the tour GIFs.
 set -e
 cd "$(dirname "$0")"
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"

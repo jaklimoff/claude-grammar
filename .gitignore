@@ -1,6 +1,6 @@
 # Written by Claude Code when it loads the mod
 .claude-plugin/types/
 tsconfig.json
-docs/demo.gif
+docs/tour-*.gif
 docs/cost-*.png
 .DS_Store

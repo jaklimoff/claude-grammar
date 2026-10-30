@@ -11,14 +11,14 @@ git clone https://github.com/jaklimoff/claude-grammar && cd claude-grammar
 claude --plugin-dir .              # Claude Code with your working copy of the mod
 ```
 
-Claude Code writes the mod's type definitions to `.claude-plugin/types/` the first time it loads the plugin; `tsconfig.json` points at them.
+The first time Claude Code loads the plugin, it writes the mod's type definitions to `.claude-plugin/types/` and a `tsconfig.json` that points at them. Both are generated, so they aren't in the repo: start Claude Code with the plugin once before you run `tsc`.
 
 ## Before you send a pull request
 
 ```
-claude plugin test .               # the tests, with the model mocked: no calls, no cost
-claude plugin validate --strict .  # the plugin's manifest, hooks and API use
-npx tsc --noEmit -p .              # types
+claude plugin test .                 # the tests, with the model mocked: no calls, no cost
+claude plugin validate --strict .    # the plugin's manifest, hooks and API use
+npx -p typescript tsc --noEmit -p .  # types (needs the generated tsconfig.json, see Setup)
 ```
 
 CI runs the first two on every push and pull request, and weekly against the latest Claude Code.

@@ -1,6 +1,6 @@
 {
   "name": "grammar",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Checks the English of each prompt you send to Claude Code and shows the fixes under it. Sends each prompt you type to Haiku (one small call per prompt) through your own Claude Code session",
   "author": {
     "name": "Jack Klimov",
@@ -8,6 +8,80 @@
   },
   "repository": "https://github.com/jaklimoff/claude-grammar",
   "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Check my prompts",
+      "description": "Send each prompt you type to the model for an English check. /grammar on|off sets this too.",
+      "default": true
+    },
+    "natural": {
+      "type": "boolean",
+      "title": "Native-speaker line",
+      "description": "Also show how a native speaker would say a sentence when the phrasing is clearly off. /grammar natural on|off sets this too.",
+      "default": true
+    },
+    "model": {
+      "type": "string",
+      "title": "Model",
+      "description": "The model that checks each prompt. Sonnet catches more and costs more.",
+      "default": "haiku",
+      "options": [
+        "haiku",
+        "sonnet"
+      ]
+    },
+    "effort": {
+      "type": "string",
+      "title": "Effort",
+      "description": "How hard the model thinks about each prompt. Higher is slower and costs more.",
+      "default": "low",
+      "options": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "dialect": {
+      "type": "string",
+      "title": "Spelling",
+      "description": "any accepts US and UK spelling alike; us or uk flags the other one's spellings.",
+      "default": "any",
+      "options": [
+        "any",
+        "us",
+        "uk"
+      ]
+    },
+    "min_words": {
+      "type": "number",
+      "title": "Minimum words",
+      "description": "Prompts with fewer words than this (ok, yes, continue) are not checked.",
+      "default": 2,
+      "min": 1,
+      "max": 50
+    },
+    "max_chars": {
+      "type": "number",
+      "title": "Maximum characters",
+      "description": "How much of a long prompt is checked (and sent), cut at a word boundary.",
+      "default": 6000,
+      "min": 200,
+      "max": 20000
+    },
+    "icons": {
+      "type": "boolean",
+      "title": "Nerd Font icons",
+      "description": "Off draws plain characters for terminals without a Nerd Font.",
+      "default": true
+    },
+    "show_why": {
+      "type": "boolean",
+      "title": "Show why",
+      "description": "Show the short reason after each fix.",
+      "default": true
+    }
+  },
   "license": "MIT",
   "homepage": "https://github.com/jaklimoff/claude-grammar",
   "documentationUrl": "https://github.com/jaklimoff/claude-grammar#readme",

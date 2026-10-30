@@ -3,3 +3,4 @@
 tsconfig.json
 docs/demo.gif
 docs/cost-*.png
+.DS_Store

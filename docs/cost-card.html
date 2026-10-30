@@ -53,29 +53,29 @@
 </head>
 <body>
   <div class="kicker">What the grammar check costs</div>
-  <div class="hero">A 50-prompt session: <b>$0.003 to $0.035</b></div>
-  <div class="sub">One Claude Haiku 5.5 call per prompt at low effort. Measured 2026-10-30, 5 runs per prompt, API prices.</div>
+  <div class="hero">A 50-prompt session: <b>$0.003 to $0.02</b></div>
+  <div class="sub">One Claude Haiku 5.5 call per prompt at low effort. Measured 2026-10-30 on version 1.1.0, 10 runs per prompt, API prices.</div>
 
   <div class="rows">
-    <!-- bar scale: 0 to $0.0007 per check; solid = cheapest run, light = most expensive run -->
+    <!-- bar scale: 0 to $0.0005 per check; solid = cheapest run, light = most expensive run -->
     <div class="row">
-      <div><div class="name">Clean prompt</div><div class="tok">539 in · 21 out</div></div>
-      <div class="track"><div class="seg solid" style="width:9.1%"></div></div>
+      <div><div class="name">Clean prompt</div><div class="tok">520 in · 21 out</div></div>
+      <div class="track"><div class="seg solid" style="width:12.5%"></div></div>
       <div class="cost">$0.00006</div>
     </div>
     <div class="row">
-      <div><div class="name">3 mistakes</div><div class="tok">550 in · 540–820 out</div></div>
-      <div class="track"><div class="seg range" style="width:66.4%"></div><div class="seg solid" style="width:46.4%"></div></div>
-      <div class="cost">$0.0003–0.0005</div>
+      <div><div class="name">3 mistakes</div><div class="tok">531 in · 447–691 out</div></div>
+      <div class="track"><div class="seg range" style="width:79.9%"></div><div class="seg solid" style="width:55.3%"></div></div>
+      <div class="cost">$0.0003–0.0004</div>
     </div>
     <div class="row">
-      <div><div class="name">5+ mistakes</div><div class="tok">575 in · 1,010–1,250 out</div></div>
-      <div class="track"><div class="seg range" style="width:97.5%"></div><div class="seg solid" style="width:80.4%"></div></div>
-      <div class="cost">$0.0006–0.0007</div>
+      <div><div class="name">5+ mistakes</div><div class="tok">556 in · 193–487 out</div></div>
+      <div class="track"><div class="seg range" style="width:59.8%"></div><div class="seg solid" style="width:30.4%"></div></div>
+      <div class="cost">$0.00015–0.0003</div>
     </div>
   </div>
 
-  <div class="foot">Bars: the cheapest of the 5 runs, then the most expensive in the fainter shade. On a subscription the same tokens count toward your plan's usage. <code>/grammar off</code> stops the calls.</div>
+  <div class="foot">Bars: the cheapest of the 10 runs, then the most expensive in the fainter shade. On a subscription the same tokens count toward your plan's usage. <code>/grammar off</code> stops the calls.</div>
   <script>const q = new URLSearchParams(location.search); document.documentElement.dataset.theme = q.get('theme') || 'light'; document.documentElement.dataset.palette = q.get('palette') || 'anthropic';</script>
 </body>
 </html>

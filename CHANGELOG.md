@@ -1,6 +1,6 @@
 # Changelog
 
-Bump `version` in `.claude-plugin/plugin.json` on every change: installed copies update only when it changes.
+Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/jaklimoff/claude-grammar/releases) with its section below as the notes. Bump `version` in `.claude-plugin/plugin.json` on every change to what ships: installed copies update only when it changes. How releases work: [CONTRIBUTING.md](CONTRIBUTING.md#versions-and-releases).
 
 ## 1.2.0 (2026-10-30)
 

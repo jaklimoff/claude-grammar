@@ -242,7 +242,7 @@ docs/render-cost.sh brand      # render the cost card PNGs; they live on the med
 
 ## Contributing
 
-Issues and PRs welcome. Run `claude plugin validate --strict .` and `claude plugin test .` before sending one.
+Issues and PRs welcome: [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the checks to run and how releases work. Report security problems privately: [SECURITY.md](SECURITY.md). What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

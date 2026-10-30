@@ -2,6 +2,7 @@ name: test
 
 on:
   push:
+    branches: ['**'] # not tags: a release tag is made from a commit already tested here
   pull_request:
   schedule:
     - cron: '0 6 * * 1' # weekly: catches a Claude Code release that breaks the mod
@@ -15,3 +16,32 @@ jobs:
       - run: claude --version
       - run: claude plugin validate --strict .
       - run: claude plugin test .
+
+  # A push to main whose plugin.json version has no tag yet: tag that commit vX.Y.Z and publish a release with the
+  # version's CHANGELOG.md section as its notes. See CONTRIBUTING.md.
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and release a new version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version .claude-plugin/plugin.json)
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag is already released."
+            exit 0
+          fi
+          docs/changelog-section.sh "$version" > notes.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "grammar $version" "$GITHUB_SHA"
+          git push origin "$tag"
+          gh release create "$tag" --verify-tag --title "$tag" --notes-file notes.md

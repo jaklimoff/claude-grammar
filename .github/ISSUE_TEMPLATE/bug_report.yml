@@ -1,0 +1,48 @@
+name: Bug report
+description: Something the mod does wrong, or a line that doesn't show.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Leave out anything private: prompts you paste here are public.
+        For a security problem, use [private reporting](https://github.com/jaklimoff/claude-grammar/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to see it again
+      description: A prompt or command that shows it, with your private text taken out.
+      placeholder: |
+        1. Send the prompt "..."
+        2. ...
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: The output of `claude --version`.
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: grammar version
+      description: Shown under /plugin, or the version in the plugin's plugin.json.
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: OS and terminal
+      placeholder: macOS 15, iTerm2
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: Anything you changed from the defaults (model, effort, dialect, icons, history), and the output of /grammar help if it helps.

@@ -1,0 +1,16 @@
+name: Feature request
+description: Something the mod should do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The problem first, the solution second. What are you trying to do, and what gets in the way now?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: A command, a setting, what it would show. Mention any extra model calls or tokens it would need, since every check costs some.

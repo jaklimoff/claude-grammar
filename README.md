@@ -56,7 +56,7 @@ A mod is code that runs inside Claude Code with your permissions, so read it bef
 | `$.session.surfaces` | Skipping runs that draw nowhere. |
 | `$.clock.after`, `$.ui.resolve` | Running the check off the prompt's path, and drawing the lines. |
 
-No files, no processes, no other network. `claude plugin validate .` prints the same list for any mod.
+No files, no processes, no other network. `claude plugin validate .` prints the same list for any mod. The full note is in [PRIVACY.md](PRIVACY.md).
 
 ## Requirements
 

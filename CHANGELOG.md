@@ -2,6 +2,10 @@
 
 Bump `version` in `.claude-plugin/plugin.json` on every change: installed copies update only when it changes.
 
+## 1.0.3 (2026-10-30)
+
+A privacy note (PRIVACY.md), and homepage, docs, support and privacy links in plugin.json.
+
 ## 1.0.2 (2026-10-30)
 
 Code reads the way the plugin directory's checks expect; the demo GIF moved to the `media` branch.

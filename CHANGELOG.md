@@ -2,16 +2,11 @@
 
 Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/jaklimoff/claude-grammar/releases) with its section below as the notes. Bump `version` in `.claude-plugin/plugin.json` on every change to what ships: installed copies update only when it changes. How releases work: [CONTRIBUTING.md](CONTRIBUTING.md#versions-and-releases).
 
-## 1.4.0 (2026-10-30)
-
-- In the desktop app the newest check now shows in color in a band above the prompt box, drawn like the line under the prompt in the terminal. A small Hide button hides it until the next check finishes; a clean check shows nothing.
-- The `desktop` setting gets a `band` option, the new default: the band plus the dim transcript line, which stays as the record of past checks. `line`, `toast` and `off` work as before.
-- The transcript line no longer starts with `grammar:`: the desktop app already names the plugin beside it.
-
 ## 1.3.0 (2026-10-30)
 
-- The desktop app doesn't draw the line under the prompt, so each check's fixes (and the native-speaker line) now show there as a dim line in the transcript. A clean prompt shows nothing; a failed check shows why.
-- A `desktop` setting: `line` (the default), `toast` to show them briefly as a toast instead, or `off`. The terminal is unchanged.
+- The desktop app doesn't draw the line under the prompt, so a check's fixes never showed there. Now the newest check shows in color in a band above the prompt box, drawn like the line under the prompt in the terminal. A small Hide button hides it until the next check finishes; a clean check shows nothing.
+- Each check there also adds a dim line to the transcript, as the record of past checks. A failed check says why.
+- A `desktop` setting: `band` (the default: the band plus the transcript line), `line` for the transcript line alone, `toast` to show the fixes briefly as a toast instead, or `off`. The terminal is unchanged.
 
 ## 1.2.0 (2026-10-30)
 

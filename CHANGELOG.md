@@ -2,6 +2,12 @@
 
 Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/jaklimoff/claude-grammar/releases) with its section below as the notes. Bump `version` in `.claude-plugin/plugin.json` on every change to what ships: installed copies update only when it changes. How releases work: [CONTRIBUTING.md](CONTRIBUTING.md#versions-and-releases).
 
+## 1.3.0 (2026-10-30)
+
+- The desktop app doesn't draw the line under the prompt, so a check's fixes never showed there. Now the newest check shows in color in a band above the prompt box, drawn like the line under the prompt in the terminal, but with plain icons and one row per fix. A small Hide button hides it until the next check finishes; a clean check shows nothing.
+- Each check there also adds a dim line to the transcript, as the record of past checks. A failed check says why.
+- A `desktop` setting: `band` (the default: the band plus the transcript line), `line` for the transcript line alone, `toast` to show the fixes briefly as a toast instead, or `off`. The terminal is unchanged.
+
 ## 1.2.0 (2026-10-30)
 
 - Your mistakes over time. Each fix is kept in `grammar-history.json` in your Claude Code folder, labeled with the kind of mistake (article, preposition, tense, ...). The history holds 90 days and up to 2000 fixes. Fixes that look like code or paths aren't kept, and neither are prompts or the native-speaker line. The first session that keeps fixes starts with a notice naming the file, once. A file cut short while it is written keeps the lines that still parse, the day counts first.

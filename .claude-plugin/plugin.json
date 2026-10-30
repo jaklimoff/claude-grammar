@@ -1,6 +1,6 @@
 {
   "name": "grammar",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Checks the English of each prompt you send to Claude Code, shows the fixes under it, and keeps them so /grammar stats and /grammar review show the mistakes you make most. Sends each prompt you type to Haiku (one small call per prompt), and the kept fixes to Sonnet when you run /grammar review, through your own Claude Code session",
   "author": {
     "name": "Jack Klimov",
@@ -72,7 +72,7 @@
     "icons": {
       "type": "boolean",
       "title": "Nerd Font icons",
-      "description": "Off draws plain characters for terminals without a Nerd Font.",
+      "description": "In the terminal, off draws plain characters for terminals without a Nerd Font. The desktop app always draws plain characters.",
       "default": true
     },
     "show_why": {
@@ -80,6 +80,18 @@
       "title": "Show why",
       "description": "Show the short reason after each fix.",
       "default": true
+    },
+    "desktop": {
+      "type": "string",
+      "title": "In the desktop app",
+      "description": "The desktop app doesn't draw the line under your prompt. band shows the fixes in color in a band above the prompt box, and also as a dim line in the transcript; line only the dim line; toast shows them briefly as a toast; off shows nothing there.",
+      "default": "band",
+      "options": [
+        "band",
+        "line",
+        "toast",
+        "off"
+      ]
     },
     "history": {
       "type": "boolean",

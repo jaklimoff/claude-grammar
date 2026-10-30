@@ -41,6 +41,8 @@ declare module 'claude-code' {
       grammarLastId: number
       // Failed checks in a row; at MAX_FAILS the checks pause until /grammar on.
       grammarFails: number
+      // The id of the check whose band was hidden in the desktop app.
+      grammarHiddenId: number
     }
   }
 }

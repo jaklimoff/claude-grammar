@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { applyFixes, compileIgnore, compileSkip, cut, entriesFrom, mergeLists, parseLists, settingsFrom, wordCount } from '../hooks/config'
 import { BATCH, keepFixes, parseBatch, parseReply, system, typedPart } from '../hooks/check'
-import { checkFor, usefulNatural } from '../hooks/grammar'
+import { checkFor, plainText, usefulNatural } from '../hooks/grammar'
 import { historyText, importWindow, keepable, kindOf, merge, pairsOf, parseHistory, parsePeriod, prune, record, reviewInput, statsText, summaryOf, trendOf, within } from '../hooks/history'
 import type { Period } from '../hooks/history'
 import type { Entry, History, Kind } from '../hooks/history'
@@ -66,6 +66,11 @@ const engine = (on: On, surfaces: string[] = ['terminal'], files: Record<string,
   mock.store(on, stored)
   const written = disk(on, files)
   toasts.length = 0
+  lines.length = 0
+  on('ui.log', (_$, e) => {
+    lines.push((e as { text: string }).text)
+    return { value: undefined } as never
+  })
   on('ui.toast', ($, e) => {
     toasts.push((e as { text: string }).text)
     return { value: undefined } as never
@@ -80,6 +85,8 @@ const engine = (on: On, surfaces: string[] = ['terminal'], files: Record<string,
 
 // The toasts of the running test.
 const toasts: string[] = []
+// The transcript lines of the running test.
+const lines: string[] = []
 
 type Asked = { prompts: string[]; systems: string[]; models: string[]; files: Map<string, string> }
 
@@ -262,6 +269,143 @@ test('/grammar help lists the commands and what is on now', { options: { model: 
   expect((await $.command.run({ command: 'grammar', args: 'help' } as never)).text).toContain('Check: off.')
 })
 
+// The check's own lines and toasts; the plugin's notices start with its name.
+const mine = (xs: string[]) => xs.filter(t => !t.startsWith('grammar:'))
+
+test('on a desktop-only session the fixes show as a transcript line', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { ...FIXES, natural: 'it should show up just above the prompt' }, ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(mine(lines)).toEqual(['appea → appear (typo)  ·  about → above (wrong word)\n↳ it should show up just above the prompt'])
+  expect(mine(toasts)).toEqual([])
+})
+
+test('nothing extra shows in the terminal', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, FIXES)
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(mine(lines)).toEqual([])
+  expect(mine(toasts)).toEqual([])
+})
+
+test('desktop toast shows a toast instead of a line', { options: { desktop: 'toast', show_why: false } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, FIXES, ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(mine(toasts)).toEqual(['appea → appear  ·  about → above'])
+  expect(mine(lines)).toEqual([])
+})
+
+test('desktop off shows nothing there', { options: { desktop: 'off' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, FIXES, ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(mine(lines)).toEqual([])
+  expect(mine(toasts)).toEqual([])
+})
+
+test('a clean prompt or another language shows nothing on the desktop', async ($, on) => {
+  const clock = mock.clock(on)
+  let reply: unknown = { english: true, fixes: [] }
+  haiku(on, () => reply, ['desktop'])
+  await $.prompt.submit({ text: 'looks good to me' } as never)
+  await clock.advance(5)
+  reply = { english: false, fixes: [] }
+  await $.prompt.submit({ text: 'das ist gut so' } as never)
+  await clock.advance(5)
+  expect(mine(lines)).toEqual([])
+  expect(mine(toasts)).toEqual([])
+})
+
+test('a failed check shows as a transcript line on the desktop', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, 'sorry, no', ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(lines.filter(t => t.startsWith('no check: ')).length).toBe(1)
+})
+
+/** The band above the prompt on a surface. */
+const mountBand = ($: Engine, surface: 'desktop' | 'terminal', hasSurvey = false) =>
+  $.ui.mount({
+    plugin: 'grammar',
+    surface,
+    component: 'AbovePrompt',
+    props: { hasSurvey, isWorking: false } as never,
+  })
+
+test('the desktop band shows the newest fixes in color, the terminal none', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { ...FIXES, natural: 'it should show up just above the prompt' }, ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  const band = await mountBand($, 'desktop')
+  const fixes = (await band.find({ key: 'gr-fixes' }))?.text ?? ''
+  expect(fixes).toContain('appea')
+  expect(fixes).toContain('appear')
+  expect((await band.find({ key: 'gr-natural' }))?.text).toContain('just above the prompt')
+  expect(await band.find({ key: 'hide' })).toBeDefined()
+  expect(await (await mountBand($, 'terminal')).find({ key: 'grammar-band' })).toBeUndefined()
+  expect(await (await mountBand($, 'desktop', true)).find({ key: 'grammar-band' })).toBeUndefined()
+})
+
+test('the desktop band draws one row per fix with plain icons, the terminal one row', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { ...FIXES, natural: 'it should show up just above the prompt' }, ['desktop', 'terminal'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  const band = await mountBand($, 'desktop')
+  expect(await band.find({ key: 'gr-row0' })).toBeDefined()
+  expect(await band.find({ key: 'gr-row1' })).toBeDefined()
+  expect((await band.find({ key: 'gr-fixes' }))?.text ?? '').not.toContain('  · ')
+  const all = (await band.find({ key: 'grammar-band' }))?.text ?? ''
+  expect(all).not.toMatch(/[\ue000-\uf8ff]/)
+  expect(all).toContain('✎')
+  expect(all).toContain('↳')
+})
+
+test('desktop line draws no band', { options: { desktop: 'line' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, FIXES, ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeUndefined()
+  expect(mine(lines).length).toBe(1)
+})
+
+test('Hide hides the band until the next check', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, FIXES, ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  const band = await mountBand($, 'desktop')
+  await band.press({ key: 'hide' } as never)
+  expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeUndefined()
+  await $.prompt.submit({ text: `${TYPO} again` } as never)
+  await clock.advance(5)
+  expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeDefined()
+})
+
+test('a clean newest check clears the band instead of keeping an older one', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, (n: number) => (n === 1 ? FIXES : { english: true, fixes: [] }), ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeDefined()
+  await $.prompt.submit({ text: 'looks good to me' } as never)
+  await clock.advance(5)
+  expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeUndefined()
+})
+
+test('plain text: fixes, removals, the reason and the native-speaker line', () => {
+  expect(plainText([{ from: 'the the', to: '', why: 'repeated' } as never], null, true)).toBe('the the → (remove) (repeated)')
+  expect(plainText([], 'say it so', true)).toBe('↳ say it so')
+})
+
 test('a run that draws nowhere (claude -p) asks the model nothing', async ($, on) => {
   const clock = mock.clock(on)
   const asked = haiku(on, FIXES, [])
@@ -430,9 +574,10 @@ test('config helpers: settings, lists, words and cuts', () => {
     maxChars: 6000,
     icons: true,
     showWhy: true,
+    desktop: 'band',
     history: true,
   })
-  expect(settingsFrom({ effort: 'max', max_chars: 5, dialect: 'au' })).toMatchObject({ effort: 'low', maxChars: 200, dialect: 'any' })
+  expect(settingsFrom({ effort: 'max', max_chars: 5, dialect: 'au' })).toMatchObject({ effort: 'low', maxChars: 200, dialect: 'any', desktop: 'band' })
   expect(parseLists('{"ignore": ["a", 3, ""], "other": 1}')).toEqual({ ignore: ['a'], skip: [], history: true })
   expect(parseLists('{"history": false}').history).toBe(false)
   expect(() => parseLists('[]')).toThrow()

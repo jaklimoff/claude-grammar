@@ -44,6 +44,8 @@ const reviews = atom({ plugin: 'grammar', key: 'grammarReviews' } as const, [] a
 // The latest checks, newest first, each with the prompt it checked.
 const checks = atom({ plugin: 'grammar', key: 'grammarChecks' } as const, [] as GrammarCheck[])
 const lastId = atom({ plugin: 'grammar', key: 'grammarLastId' } as const, 0)
+// The id of the check whose band was hidden; the next check shows again.
+const hiddenId = atom({ plugin: 'grammar', key: 'grammarHiddenId' } as const, 0)
 const fails = atom({ plugin: 'grammar', key: 'grammarFails' } as const, 0)
 
 // Where 1.0 kept the two switches; moved into the plugin's settings on the first start of 1.1.
@@ -58,6 +60,8 @@ const MAX_FAILS = 3
 
 const NERD_ICONS = { logo: '', error: '', natural: '' }
 const PLAIN_ICONS = { logo: '*', error: '!', natural: '>' }
+// The desktop app has no Nerd Font and a proportional one: always plain, whatever `icons` says.
+const DESKTOP_ICONS = { logo: '✎', error: '!', natural: '↳' }
 
 const same = (a: string, b: string) => {
   const plain = (s: string) => s.trim().toLowerCase().replace(/[.!?]+$/, '')
@@ -276,6 +280,34 @@ const run = async ($: EngineInterface, s: Settings, id: number, text: string) =>
   if (history && final?.status === 'done') {
     await keepInTurn($, final.fixes)
   }
+  await showElsewhere($, s, final)
+}
+
+/** The fixes and the native-speaker line as plain text. */
+export const plainText = (fixes: readonly GrammarFix[], natural: string | null, showWhy: boolean) => {
+  const list = fixes.map(f => `${f.from} → ${f.to === '' ? '(remove)' : f.to}${showWhy && f.why !== '' ? ` (${f.why})` : ''}`)
+  return `${list.join('  ·  ')}${natural === null ? '' : `${list.length > 0 ? '\n' : ''}↳ ${natural}`}`
+}
+
+/** Shows a check's result as a transcript line or a toast where the line under the prompt isn't drawn (the desktop app), as `desktop` says. */
+const showElsewhere = async ($: EngineInterface, s: Settings, final: GrammarCheck | null) => {
+  try {
+    if (final === null || s.desktop === 'off' || !(await $.session.surfaces()).some(x => x !== 'terminal')) {
+      return
+    }
+    const show = (text: string) => (s.desktop === 'toast' ? $.ui.toast(text, { timeoutMs: 15000 }) : $.ui.log(text))
+    if (final.status === 'error') {
+      const paused = final.paused ? `; paused after ${MAX_FAILS} failures in a row, /grammar on to try again` : ''
+      show(`no check: ${final.error ?? 'unknown'}${paused}`)
+      return
+    }
+    const natural = (await read($, isNatural)) ? final.natural ?? null : null
+    if (final.fixes.length > 0 || natural !== null) {
+      show(plainText(final.fixes, natural, s.showWhy))
+    }
+  } catch {
+    // A line that cannot show is not worth failing the check for.
+  }
 }
 
 /** Queues a check of a prompt you typed, unless it is off, paused, too short, or nothing would show it. */
@@ -461,7 +493,7 @@ const historyLine = async ($: EngineInterface) => {
 
 export const register: Register = (on, options) => {
   const s = settingsFrom(options)
-  const ICON = s.icons ? NERD_ICONS : PLAIN_ICONS
+  const TERMINAL_ICON = s.icons ? NERD_ICONS : PLAIN_ICONS
 
   on('session.start', async ($, e, next) => {
     const moved = await migrate($).catch(() => ({}) as Record<string, boolean>)
@@ -660,19 +692,9 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // Under each prompt you typed: its fixes, then the natural rewrite. Nothing while checking or when clean.
-  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => {
-    const row = await next(e)
-    const c = checkFor(await read($, checks), e.props.text)
-    if (c === undefined || c.status === 'checking') {
-      return row
-    }
-    const natural = (await read($, isNatural)) ? c.natural ?? null : null
-    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
-      return row
-    }
-
-    const { Box, Text } = $.ui.resolve(e)
+  /** The error line, fixes line and native-speaker line of a check, as the row under the prompt and the band draw them. */
+  const linesOf = ({ Box, Text }: ReturnType<EngineInterface['ui']['resolve']>, c: GrammarCheck, natural: string | null, wide: boolean) => {
+    const ICON = wide ? DESKTOP_ICONS : TERMINAL_ICON
     const lines: RenderNode[] = []
     if (c.status === 'error') {
       const paused = c.paused ? `; paused after ${MAX_FAILS} failures in a row, /grammar on to try again` : ''
@@ -684,21 +706,36 @@ export const register: Register = (on, options) => {
         </Box>,
       )
     }
-    if (c.fixes.length > 0) {
+    const fix = (f: GrammarCheck['fixes'][number], i: number) => (
+      <Text key={`gr-f${i}`}>
+        {i > 0 && !wide && <Text dimColor>{'  · '}</Text>}
+        <Text color="error" strikethrough>
+          {f.from}
+        </Text>
+        {f.to !== '' && <Text color="success">{` ${f.to}`}</Text>}
+        {s.showWhy && f.why !== '' && <Text dimColor>{` ${f.why}`}</Text>}
+      </Text>
+    )
+    if (c.fixes.length > 0 && wide) {
+      // One row per fix, the icon on the first row only.
+      lines.push(
+        <Box key="gr-fixes" flexDirection="column">
+          {c.fixes.map((f, i) => (
+            <Box key={`gr-row${i}`}>
+              <Box width={2} flexShrink={0}>
+                <Text color="suggestion">{i === 0 ? ICON.logo : ''}</Text>
+              </Box>
+              <Text wrap="wrap">{fix(f, i)}</Text>
+            </Box>
+          ))}
+        </Box>,
+      )
+    } else if (c.fixes.length > 0) {
       lines.push(
         <Box key="gr-fixes">
           <Text wrap="wrap">
             <Text color="suggestion">{`${ICON.logo} `}</Text>
-            {c.fixes.map((f, i) => (
-              <Text key={`gr-f${i}`}>
-                {i > 0 && <Text dimColor>{'  · '}</Text>}
-                <Text color="error" strikethrough>
-                  {f.from}
-                </Text>
-                {f.to !== '' && <Text color="success">{` ${f.to}`}</Text>}
-                {s.showWhy && f.why !== '' && <Text dimColor>{` ${f.why}`}</Text>}
-              </Text>
-            ))}
+            {c.fixes.map(fix)}
           </Text>
         </Box>,
       )
@@ -715,6 +752,24 @@ export const register: Register = (on, options) => {
         </Box>,
       )
     }
+    return lines
+  }
+
+  // Under each prompt you typed: its fixes, then the natural rewrite. Nothing while checking or when clean.
+  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => {
+    const row = await next(e)
+    const c = checkFor(await read($, checks), e.props.text)
+    if (c === undefined || c.status === 'checking') {
+      return row
+    }
+    const natural = (await read($, isNatural)) ? c.natural ?? null : null
+    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
+      return row
+    }
+
+    const ui = $.ui.resolve(e)
+    const { Box } = ui
+    const lines = linesOf(ui, c, natural, e.surface !== 'terminal')
 
     return (
       <Box key="grammar" flexDirection="column">
@@ -722,6 +777,32 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" paddingLeft={2}>
           {lines}
         </Box>
+      </Box>
+    )
+  })
+
+  // The desktop app doesn't draw the row above, so there the newest check shows in a band above the prompt. Nothing while checking or when clean.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface === 'terminal' || s.desktop !== 'band' || e.props.hasSurvey) {
+      return next(e)
+    }
+    const c = (await read($, checks))[0]
+    if (c === undefined || c.status === 'checking' || (await read($, hiddenId)) === c.id) {
+      return next(e)
+    }
+    const natural = (await read($, isNatural)) ? c.natural ?? null : null
+    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
+      return next(e)
+    }
+
+    const ui = $.ui.resolve(e)
+    const { Box, Button } = ui
+    return (
+      <Box key="grammar-band" flexDirection="row">
+        <Box key="gr-band-lines" flexDirection="column" flexGrow={1}>
+          {linesOf(ui, c, natural, true)}
+        </Box>
+        <Button key="hide" label="Hide" onPress={() => update($, hiddenId, () => c.id)} />
       </Box>
     )
   })

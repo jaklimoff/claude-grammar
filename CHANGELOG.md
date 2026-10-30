@@ -4,7 +4,7 @@ Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/ja
 
 ## 1.3.0 (2026-10-30)
 
-- The desktop app doesn't draw the line under the prompt, so a check's fixes never showed there. Now the newest check shows in color in a band above the prompt box, drawn like the line under the prompt in the terminal. A small Hide button hides it until the next check finishes; a clean check shows nothing.
+- The desktop app doesn't draw the line under the prompt, so a check's fixes never showed there. Now the newest check shows in color in a band above the prompt box, drawn like the line under the prompt in the terminal, but with plain icons and one row per fix. A small Hide button hides it until the next check finishes; a clean check shows nothing.
 - Each check there also adds a dim line to the transcript, as the record of past checks. A failed check says why.
 - A `desktop` setting: `band` (the default: the band plus the transcript line), `line` for the transcript line alone, `toast` to show the fixes briefly as a toast instead, or `off`. The terminal is unchanged.
 

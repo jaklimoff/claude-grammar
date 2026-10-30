@@ -60,6 +60,8 @@ const MAX_FAILS = 3
 
 const NERD_ICONS = { logo: '', error: '', natural: '' }
 const PLAIN_ICONS = { logo: '*', error: '!', natural: '>' }
+// The desktop app has no Nerd Font and a proportional one: always plain, whatever `icons` says.
+const DESKTOP_ICONS = { logo: '✎', error: '!', natural: '↳' }
 
 const same = (a: string, b: string) => {
   const plain = (s: string) => s.trim().toLowerCase().replace(/[.!?]+$/, '')
@@ -491,7 +493,7 @@ const historyLine = async ($: EngineInterface) => {
 
 export const register: Register = (on, options) => {
   const s = settingsFrom(options)
-  const ICON = s.icons ? NERD_ICONS : PLAIN_ICONS
+  const TERMINAL_ICON = s.icons ? NERD_ICONS : PLAIN_ICONS
 
   on('session.start', async ($, e, next) => {
     const moved = await migrate($).catch(() => ({}) as Record<string, boolean>)
@@ -691,7 +693,8 @@ export const register: Register = (on, options) => {
   })
 
   /** The error line, fixes line and native-speaker line of a check, as the row under the prompt and the band draw them. */
-  const linesOf = ({ Box, Text }: ReturnType<EngineInterface['ui']['resolve']>, c: GrammarCheck, natural: string | null) => {
+  const linesOf = ({ Box, Text }: ReturnType<EngineInterface['ui']['resolve']>, c: GrammarCheck, natural: string | null, wide: boolean) => {
+    const ICON = wide ? DESKTOP_ICONS : TERMINAL_ICON
     const lines: RenderNode[] = []
     if (c.status === 'error') {
       const paused = c.paused ? `; paused after ${MAX_FAILS} failures in a row, /grammar on to try again` : ''
@@ -703,21 +706,36 @@ export const register: Register = (on, options) => {
         </Box>,
       )
     }
-    if (c.fixes.length > 0) {
+    const fix = (f: GrammarCheck['fixes'][number], i: number) => (
+      <Text key={`gr-f${i}`}>
+        {i > 0 && !wide && <Text dimColor>{'  · '}</Text>}
+        <Text color="error" strikethrough>
+          {f.from}
+        </Text>
+        {f.to !== '' && <Text color="success">{` ${f.to}`}</Text>}
+        {s.showWhy && f.why !== '' && <Text dimColor>{` ${f.why}`}</Text>}
+      </Text>
+    )
+    if (c.fixes.length > 0 && wide) {
+      // One row per fix, the icon on the first row only.
+      lines.push(
+        <Box key="gr-fixes" flexDirection="column">
+          {c.fixes.map((f, i) => (
+            <Box key={`gr-row${i}`}>
+              <Box width={2} flexShrink={0}>
+                <Text color="suggestion">{i === 0 ? ICON.logo : ''}</Text>
+              </Box>
+              <Text wrap="wrap">{fix(f, i)}</Text>
+            </Box>
+          ))}
+        </Box>,
+      )
+    } else if (c.fixes.length > 0) {
       lines.push(
         <Box key="gr-fixes">
           <Text wrap="wrap">
             <Text color="suggestion">{`${ICON.logo} `}</Text>
-            {c.fixes.map((f, i) => (
-              <Text key={`gr-f${i}`}>
-                {i > 0 && <Text dimColor>{'  · '}</Text>}
-                <Text color="error" strikethrough>
-                  {f.from}
-                </Text>
-                {f.to !== '' && <Text color="success">{` ${f.to}`}</Text>}
-                {s.showWhy && f.why !== '' && <Text dimColor>{` ${f.why}`}</Text>}
-              </Text>
-            ))}
+            {c.fixes.map(fix)}
           </Text>
         </Box>,
       )
@@ -751,7 +769,7 @@ export const register: Register = (on, options) => {
 
     const ui = $.ui.resolve(e)
     const { Box } = ui
-    const lines = linesOf(ui, c, natural)
+    const lines = linesOf(ui, c, natural, e.surface !== 'terminal')
 
     return (
       <Box key="grammar" flexDirection="column">
@@ -782,7 +800,7 @@ export const register: Register = (on, options) => {
     return (
       <Box key="grammar-band" flexDirection="row">
         <Box key="gr-band-lines" flexDirection="column" flexGrow={1}>
-          {linesOf(ui, c, natural)}
+          {linesOf(ui, c, natural, true)}
         </Box>
         <Button key="hide" label="Hide" onPress={() => update($, hiddenId, () => c.id)} />
       </Box>

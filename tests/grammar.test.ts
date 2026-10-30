@@ -353,6 +353,21 @@ test('the desktop band shows the newest fixes in color, the terminal none', asyn
   expect(await (await mountBand($, 'desktop', true)).find({ key: 'grammar-band' })).toBeUndefined()
 })
 
+test('the desktop band draws one row per fix with plain icons, the terminal one row', async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { ...FIXES, natural: 'it should show up just above the prompt' }, ['desktop', 'terminal'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+  const band = await mountBand($, 'desktop')
+  expect(await band.find({ key: 'gr-row0' })).toBeDefined()
+  expect(await band.find({ key: 'gr-row1' })).toBeDefined()
+  expect((await band.find({ key: 'gr-fixes' }))?.text ?? '').not.toContain('  · ')
+  const all = (await band.find({ key: 'grammar-band' }))?.text ?? ''
+  expect(all).not.toMatch(/[\ue000-\uf8ff]/)
+  expect(all).toContain('✎')
+  expect(all).toContain('↳')
+})
+
 test('desktop line draws no band', { options: { desktop: 'line' } }, async ($, on) => {
   const clock = mock.clock(on)
   haiku(on, FIXES, ['desktop'])

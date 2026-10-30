@@ -72,7 +72,7 @@
     "icons": {
       "type": "boolean",
       "title": "Nerd Font icons",
-      "description": "Off draws plain characters for terminals without a Nerd Font.",
+      "description": "In the terminal, off draws plain characters for terminals without a Nerd Font. The desktop app always draws plain characters.",
       "default": true
     },
     "show_why": {

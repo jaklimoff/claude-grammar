@@ -69,7 +69,7 @@ Under `/config`, or in `settings.json` under `pluginConfigs` → `grammar@gramma
 | `dialect` | `any` | `any` accepts US and UK spelling. `us` or `uk` flags the other one's spellings. |
 | `min_words` | `2` | Shorter prompts (`ok`, `yes`, `continue`) aren't checked. |
 | `max_chars` | `6000` | How much of a long prompt is checked and sent, cut at a word boundary. |
-| `icons` | `true` | Off draws plain characters for terminals without a Nerd Font. |
+| `icons` | `true` | Terminal only: off draws plain characters for terminals without a Nerd Font. The desktop app always draws plain characters. |
 | `show_why` | `true` | The short reason after each fix. |
 | `desktop` | `band` | `band`, `line`, `toast` or `off`. The desktop app doesn't draw the line under the prompt: `band` shows the newest check in color in a band above the prompt box (with a Hide button) and also adds the dim transcript line, `line` only the transcript line, `toast` shows them briefly as a toast, `off` shows nothing there. |
 | `history` | `true` | Keeps each fix for `/grammar stats` and `/grammar review`. Same as `/grammar history on\|off`. |

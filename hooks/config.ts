@@ -5,6 +5,7 @@ import type { GrammarFix } from '../types'
 
 export type Dialect = 'any' | 'us' | 'uk'
 export type Effort = 'low' | 'medium' | 'high'
+export type DesktopMode = 'band' | 'line' | 'toast' | 'off'
 
 /** The userConfig fields from plugin.json, as the module uses them. */
 export type Settings = {
@@ -17,6 +18,7 @@ export type Settings = {
   maxChars: number
   icons: boolean
   showWhy: boolean
+  desktop: DesktopMode
   history: boolean
 }
 
@@ -37,6 +39,7 @@ export const settingsFrom = (o: PluginOptions): Settings => ({
   maxChars: clamp(o.max_chars, 200, 20000, 6000),
   icons: o.icons !== false,
   showWhy: o.show_why !== false,
+  desktop: pick(o.desktop, ['band', 'line', 'toast', 'off'] as const, 'band'),
   history: o.history !== false,
 })
 

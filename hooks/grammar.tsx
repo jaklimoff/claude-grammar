@@ -44,6 +44,8 @@ const reviews = atom({ plugin: 'grammar', key: 'grammarReviews' } as const, [] a
 // The latest checks, newest first, each with the prompt it checked.
 const checks = atom({ plugin: 'grammar', key: 'grammarChecks' } as const, [] as GrammarCheck[])
 const lastId = atom({ plugin: 'grammar', key: 'grammarLastId' } as const, 0)
+// The id of the check whose band was hidden; the next check shows again.
+const hiddenId = atom({ plugin: 'grammar', key: 'grammarHiddenId' } as const, 0)
 const fails = atom({ plugin: 'grammar', key: 'grammarFails' } as const, 0)
 
 // Where 1.0 kept the two switches; moved into the plugin's settings on the first start of 1.1.
@@ -275,6 +277,34 @@ const run = async ($: EngineInterface, s: Settings, id: number, text: string) =>
   // English that was checked counts toward the history, clean or not; the line is drawn first.
   if (history && final?.status === 'done') {
     await keepInTurn($, final.fixes)
+  }
+  await showElsewhere($, s, final)
+}
+
+/** The fixes and the native-speaker line as plain text. */
+export const plainText = (fixes: readonly GrammarFix[], natural: string | null, showWhy: boolean) => {
+  const list = fixes.map(f => `${f.from} → ${f.to === '' ? '(remove)' : f.to}${showWhy && f.why !== '' ? ` (${f.why})` : ''}`)
+  return `${list.join('  ·  ')}${natural === null ? '' : `${list.length > 0 ? '\n' : ''}↳ ${natural}`}`
+}
+
+/** Shows a check's result as a transcript line or a toast where the line under the prompt isn't drawn (the desktop app), as `desktop` says. */
+const showElsewhere = async ($: EngineInterface, s: Settings, final: GrammarCheck | null) => {
+  try {
+    if (final === null || s.desktop === 'off' || !(await $.session.surfaces()).some(x => x !== 'terminal')) {
+      return
+    }
+    const show = (text: string) => (s.desktop === 'toast' ? $.ui.toast(text, { timeoutMs: 15000 }) : $.ui.log(text))
+    if (final.status === 'error') {
+      const paused = final.paused ? `; paused after ${MAX_FAILS} failures in a row, /grammar on to try again` : ''
+      show(`no check: ${final.error ?? 'unknown'}${paused}`)
+      return
+    }
+    const natural = (await read($, isNatural)) ? final.natural ?? null : null
+    if (final.fixes.length > 0 || natural !== null) {
+      show(plainText(final.fixes, natural, s.showWhy))
+    }
+  } catch {
+    // A line that cannot show is not worth failing the check for.
   }
 }
 
@@ -660,19 +690,8 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // Under each prompt you typed: its fixes, then the natural rewrite. Nothing while checking or when clean.
-  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => {
-    const row = await next(e)
-    const c = checkFor(await read($, checks), e.props.text)
-    if (c === undefined || c.status === 'checking') {
-      return row
-    }
-    const natural = (await read($, isNatural)) ? c.natural ?? null : null
-    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
-      return row
-    }
-
-    const { Box, Text } = $.ui.resolve(e)
+  /** The error line, fixes line and native-speaker line of a check, as the row under the prompt and the band draw them. */
+  const linesOf = ({ Box, Text }: ReturnType<EngineInterface['ui']['resolve']>, c: GrammarCheck, natural: string | null) => {
     const lines: RenderNode[] = []
     if (c.status === 'error') {
       const paused = c.paused ? `; paused after ${MAX_FAILS} failures in a row, /grammar on to try again` : ''
@@ -715,6 +734,24 @@ export const register: Register = (on, options) => {
         </Box>,
       )
     }
+    return lines
+  }
+
+  // Under each prompt you typed: its fixes, then the natural rewrite. Nothing while checking or when clean.
+  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => {
+    const row = await next(e)
+    const c = checkFor(await read($, checks), e.props.text)
+    if (c === undefined || c.status === 'checking') {
+      return row
+    }
+    const natural = (await read($, isNatural)) ? c.natural ?? null : null
+    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
+      return row
+    }
+
+    const ui = $.ui.resolve(e)
+    const { Box } = ui
+    const lines = linesOf(ui, c, natural)
 
     return (
       <Box key="grammar" flexDirection="column">
@@ -722,6 +759,32 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" paddingLeft={2}>
           {lines}
         </Box>
+      </Box>
+    )
+  })
+
+  // The desktop app doesn't draw the row above, so there the newest check shows in a band above the prompt. Nothing while checking or when clean.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface === 'terminal' || s.desktop !== 'band' || e.props.hasSurvey) {
+      return next(e)
+    }
+    const c = (await read($, checks))[0]
+    if (c === undefined || c.status === 'checking' || (await read($, hiddenId)) === c.id) {
+      return next(e)
+    }
+    const natural = (await read($, isNatural)) ? c.natural ?? null : null
+    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
+      return next(e)
+    }
+
+    const ui = $.ui.resolve(e)
+    const { Box, Button } = ui
+    return (
+      <Box key="grammar-band" flexDirection="row">
+        <Box key="gr-band-lines" flexDirection="column" flexGrow={1}>
+          {linesOf(ui, c, natural)}
+        </Box>
+        <Button key="hide" label="Hide" onPress={() => update($, hiddenId, () => c.id)} />
       </Box>
     )
   })

@@ -71,6 +71,7 @@ Under `/config`, or in `settings.json` under `pluginConfigs` → `grammar@gramma
 | `max_chars` | `6000` | How much of a long prompt is checked and sent, cut at a word boundary. |
 | `icons` | `true` | Off draws plain characters for terminals without a Nerd Font. |
 | `show_why` | `true` | The short reason after each fix. |
+| `desktop` | `band` | `band`, `line`, `toast` or `off`. The desktop app doesn't draw the line under the prompt: `band` shows the newest check in color in a band above the prompt box (with a Hide button) and also adds the dim transcript line, `line` only the transcript line, `toast` shows them briefly as a toast, `off` shows nothing there. |
 | `history` | `true` | Keeps each fix for `/grammar stats` and `/grammar review`. Same as `/grammar history on\|off`. |
 
 ## Ignore and skip lists
@@ -195,7 +196,8 @@ A mod is code that runs inside Claude Code with your permissions, so read it bef
 | `$.command.register` | `/grammar`. |
 | `$.fs.exists`, `$.fs.read`, `$.fs.write`, `$.env.get`, `$.session.root` | Finding and reading your `grammar.json` files, and keeping `grammar-history.json`. Writes go only to two files in your Claude Code folder: the global `grammar.json` on `/grammar ignore add\|rm`, and the history after each check and on `/grammar history clear`. |
 | `$.clock.now` | The time on each kept fix. |
-| `$.ui.toast` | The one notice for a file that doesn't parse, and the one naming the history file until it exists. |
+| `$.ui.toast` | The one notice for a file that doesn't parse, the one naming the history file until it exists, and each check's fixes in the desktop app when `desktop` is `toast`. |
+| `$.ui.log` | Each check's fixes as a dim transcript line in the desktop app, where the line under the prompt isn't drawn (the `desktop` setting, `band` by default, which adds the colored band too). |
 | `$.session.surfaces` | Skipping runs that draw nowhere. |
 | `$.clock.after`, `$.ui.resolve` | Running the check off the prompt's path, and drawing the lines. |
 
@@ -205,7 +207,7 @@ No other files, no processes, no other network. `claude plugin validate .` print
 
 - Claude Code with mods. Tested with v2.1.314, in the terminal. Mods can change between releases, so if the line stops showing after an update, check the [changelog](https://code.claude.com/docs/en/changelog).
 - A Nerd Font in your terminal for the icons. Without one, they show as empty squares; set `icons` to off for plain characters.
-- Not drawn in the VS Code extension or in `claude -p`.
+- Not drawn in the VS Code extension or in `claude -p`. In the desktop app the line under the prompt isn't drawn either, so the newest check shows in color in a band above the prompt box, with a dim transcript line as the record (the `desktop` setting; `line`, `toast` or `off` also work).
 
 ## How it works
 
@@ -217,6 +219,7 @@ The plugin is four files: `hooks/grammar.tsx` (the hooks, commands and drawing),
 | `command.run` | Handles `/grammar`. |
 | `prompt.submit` | Queues a check of the prompt on a timer, so the prompt is never held up, and passes it on unchanged. Once the check is drawn, its fixes go into the history. |
 | `ui.render` (`UserMessage`) | Draws the fixes and the native-speaker line under the transcript row of the prompt they belong to. |
+| `ui.render` (`AbovePrompt`) | Draws the newest check's fixes in a band above the prompt box in the desktop app, with a Hide button (the `desktop` setting). |
 | `ui.render` (`CommandOutput`) | Draws the `/grammar review` card in place of its plain text. |
 
 The check asks Haiku for JSON:

@@ -4,7 +4,7 @@
 
 A Claude Code plugin that checks the English of each prompt you send and shows the fixes right under it.
 
-![A prompt with three mistakes; a line under it strikes each one through in red, shows the fix in green, and says why](docs/demo.gif)
+![A prompt with three mistakes; a line under it strikes each one through in red, shows the fix in green, and says why](https://raw.githubusercontent.com/jaklimoff/claude-grammar/media/demo.gif)
 
 If English is not your first language, you write a lot of it in your prompts, and nobody tells you where it goes wrong. Claude understands you anyway, so the same mistakes stay. With this plugin, Haiku proofreads each prompt after you send it, and a dim line under that prompt shows what to fix: the wrong words struck through in red, the fixes in green, and a few words on why. When a sentence still sounds off once the grammar is fixed, a second line shows how a native speaker would say it.
 
@@ -91,7 +91,7 @@ Works well beside [open-questions](https://github.com/jaklimoff/claude-open-ques
 claude --plugin-dir .          # run Claude Code with your working copy
 claude plugin test .           # the tests in tests/grammar.test.ts, with Haiku mocked
 claude plugin validate --strict .
-vhs docs/demo.tape             # record docs/demo.gif again (see the notes at the top of the tape)
+vhs docs/demo.tape             # record the demo GIF again; it lives on the media branch (see the tape)
 ```
 
 ## Contributing

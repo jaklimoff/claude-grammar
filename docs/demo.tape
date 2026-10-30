@@ -1,4 +1,5 @@
 # Records docs/demo.gif with vhs (https://github.com/charmbracelet/vhs): `vhs docs/demo.tape` from the repo root.
+# The GIF is not committed to main: commit it as demo.gif on the media branch, which the README links to.
 # Needs Hack Nerd Font, a logged-in Claude Code, and a small project at ~/my-api (any folder with a server.ts
 # that has a /users endpoint will do). Only project settings load, so your status line and other plugins stay out;
 # manual mode without Bash keeps permission prompts out of the shot. The native-speaker line shows about one take in three.

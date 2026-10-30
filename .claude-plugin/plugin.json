@@ -1,6 +1,6 @@
 {
   "name": "grammar",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Checks the English of each prompt you send to Claude Code and shows the fixes under it. Sends each prompt you type to Haiku (one small call per prompt) through your own Claude Code session",
   "author": {
     "name": "Jack Klimov",

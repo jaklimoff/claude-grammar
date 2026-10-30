@@ -85,16 +85,20 @@ export const typedPart = (text: string) => {
   return (m === null ? text : text.slice(0, m.index)).trim()
 }
 
-const setOn = async ($: EngineInterface, on: boolean) => {
-  await update($, isOn, () => on)
-  await $.store.set(STORE_ON, on)
+const setOn = async ($: EngineInterface, want: boolean) => {
+  await update($, isOn, () => want)
+  await $.store.set(STORE_ON, want)
 }
 
-const ask = ($: EngineInterface, text: string, natural: boolean) =>
-  $.model
-    .complete({ model: MODEL, system: system(natural), prompt: text.slice(0, MAX_CHARS), maxTokens: 2048, effort: 'low', timeoutMs: 30000 })
+const ask = async ($: EngineInterface, text: string, natural: boolean) => {
+  const request = { model: MODEL, system: system(natural), prompt: text.slice(0, MAX_CHARS), maxTokens: 2048, effort: 'low' as const, timeoutMs: 30000 }
+  try {
+    return await $.model.complete(request)
+  } catch (err) {
     // Only a request the engine refuses to send rejects (a blocked model, say).
-    .catch((err: Error) => ({ isAnswered: false as const, reason: err.message }))
+    return { isAnswered: false as const, reason: (err as Error).message }
+  }
+}
 
 const run = async ($: EngineInterface, id: number, text: string) => {
   const r = await ask($, text, await read($, isNatural))

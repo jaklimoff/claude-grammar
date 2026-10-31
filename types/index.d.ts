@@ -12,6 +12,8 @@ export type GrammarCheck = {
   error?: string
   // This failure paused the checks: too many in a row.
   paused?: boolean
+  // Clean prompts in a row, this one included; set only on a clean check.
+  streak?: number
 }
 
 /** The figures at the top of a review (hooks/history.ts builds them as its Summary). */
@@ -43,6 +45,8 @@ declare module 'claude-code' {
       grammarFails: number
       // The id of the check whose band was hidden in the desktop app.
       grammarHiddenId: number
+      // Clean checks in a row this session; a check with a fix resets it.
+      grammarStreak: number
     }
   }
 }

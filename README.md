@@ -37,6 +37,13 @@ claude plugin install grammar --marketplace jaklimoff/claude-grammar
 
 Send prompts as usual. The fixes show under each one a few seconds later, while Claude works. Each prompt keeps its own lines, so scrolling back shows them all for the session.
 
+A prompt with no mistakes gets a green `✓` before it instead. From the third clean prompt in a row, a line under it counts them (`3 in a row`); a prompt with a fix or a native-speaker line starts the count over. The `clean` setting turns this off.
+
+```
+✓ ❯ please deploy it to staging
+    5 in a row
+```
+
 | Command | What it does |
 |---|---|
 | `/grammar help` | Lists the commands and shows what's on now: the check, the natural line, the model and the limits. |
@@ -72,6 +79,7 @@ Under `/config`, or in `settings.json` under `pluginConfigs` → `grammar@gramma
 | `icons` | `true` | Terminal only: off draws plain characters for terminals without a Nerd Font. The desktop app always draws plain characters. |
 | `show_why` | `true` | The short reason after each fix. |
 | `desktop` | `band` | `band`, `line`, `toast` or `off`. The desktop app doesn't draw the line under the prompt: `band` shows the newest check in color in a band above the prompt box (with a Hide button) and also adds the dim transcript line, `line` only the transcript line, `toast` shows them briefly as a toast, `off` shows nothing there. |
+| `clean` | `true` | A green `✓` before a prompt with no mistakes, and from 3 in a row, how many in a row. In the desktop app it shows as `desktop` says: in the band, as a transcript line (`line` only), or as a short toast. |
 | `history` | `true` | Keeps each fix for `/grammar stats` and `/grammar review`. Same as `/grammar history on\|off`. |
 
 ## Ignore and skip lists
@@ -96,7 +104,8 @@ Put a `grammar.json` in your Claude Code folder (`~/.claude/grammar.json`, or `$
 
 - **Checked:** spelling, grammar (tense, agreement, articles, prepositions, word order), a wrong word, a missing word.
 - **Left alone:** lowercase, punctuation style, dropped apostrophes (`lets`, `dont`), slang and short forms (`smth`, `pls`, `btw`), code, paths, logs and pasted text.
-- **No line at all:** a clean prompt, a prompt that is not English, slash commands, and anything in `claude -p` or the SDK, where nothing would show it.
+- **Only a `✓`:** a clean prompt (with `clean` on).
+- **No line at all:** a prompt that is not English, slash commands, and anything in `claude -p` or the SDK, where nothing would show it.
 
 The native-speaker line is rare on purpose. It shows only when a sentence is clearly unidiomatic even with the grammar fixed, not for style.
 

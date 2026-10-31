@@ -47,6 +47,7 @@ const lastId = atom({ plugin: 'grammar', key: 'grammarLastId' } as const, 0)
 // The id of the check whose band was hidden; the next check shows again.
 const hiddenId = atom({ plugin: 'grammar', key: 'grammarHiddenId' } as const, 0)
 const fails = atom({ plugin: 'grammar', key: 'grammarFails' } as const, 0)
+const streak = atom({ plugin: 'grammar', key: 'grammarStreak' } as const, 0)
 
 // Where 1.0 kept the two switches; moved into the plugin's settings on the first start of 1.1.
 const STORE_ON = 'grammar.on'
@@ -57,6 +58,9 @@ const STORE_ANNOUNCED = 'grammar.historyAnnounced'
 const MAX_CHECKS = 200
 // Failed checks in a row before the checks pause (a blocked model, an outage).
 const MAX_FAILS = 3
+// Clean prompts in a row before the mark counts them.
+export const STREAK_FROM = 3
+const CHECK = '✓'
 
 const NERD_ICONS = { logo: '', error: '', natural: '' }
 const PLAIN_ICONS = { logo: '*', error: '!', natural: '>' }
@@ -273,6 +277,12 @@ const run = async ($: EngineInterface, s: Settings, id: number, text: string) =>
   } else {
     await update($, fails, () => 0)
   }
+  if (result?.status === 'done') {
+    // Clean: no fixes and no native-speaker line. A failed check or another language leaves the streak as it is.
+    const clean = result.fixes.length === 0 && (!(await read($, isNatural)) || (result.natural ?? null) === null)
+    const n = await update($, streak, k => (clean ? k + 1 : 0))
+    result = clean ? { ...result, streak: n } : result
+  }
   const final = result
   // Not English: the pending check goes, so the row shows nothing.
   await update($, checks, all => all.flatMap(c => (c.id !== id ? [c] : final === null ? [] : [final])))
@@ -289,6 +299,9 @@ export const plainText = (fixes: readonly GrammarFix[], natural: string | null, 
   return `${list.join('  ·  ')}${natural === null ? '' : `${list.length > 0 ? '\n' : ''}↳ ${natural}`}`
 }
 
+/** A clean check as plain text, with the streak once it is long enough. */
+export const cleanText = (n: number) => `${CHECK} no mistakes${n >= STREAK_FROM ? ` · ${n} in a row` : ''}`
+
 /** Shows a check's result as a transcript line or a toast where the line under the prompt isn't drawn (the desktop app), as `desktop` says. */
 const showElsewhere = async ($: EngineInterface, s: Settings, final: GrammarCheck | null) => {
   try {
@@ -304,6 +317,9 @@ const showElsewhere = async ($: EngineInterface, s: Settings, final: GrammarChec
     const natural = (await read($, isNatural)) ? final.natural ?? null : null
     if (final.fixes.length > 0 || natural !== null) {
       show(plainText(final.fixes, natural, s.showWhy))
+    } else if (s.clean && final.streak !== undefined && s.desktop !== 'band') {
+      // The band shows a clean check itself; a transcript line for every clean prompt would be noise there.
+      s.desktop === 'toast' ? $.ui.toast(cleanText(final.streak), { timeoutMs: 4000 }) : $.ui.log(cleanText(final.streak))
     }
   } catch {
     // A line that cannot show is not worth failing the check for.
@@ -755,7 +771,27 @@ export const register: Register = (on, options) => {
     return lines
   }
 
-  // Under each prompt you typed: its fixes, then the natural rewrite. Nothing while checking or when clean.
+  /** A clean prompt's row: a green check before it, and under it how many clean prompts in a row from STREAK_FROM. */
+  const cleanRow = ({ Box, Text }: ReturnType<EngineInterface['ui']['resolve']>, row: RenderNode, n: number) => (
+    <Box key="grammar" flexDirection="column">
+      <Box key="gr-clean" flexDirection="row">
+        {/* The engine's row opens with a blank line: the check goes on the line after it, next to the prompt. */}
+        <Box key="gr-ok" width={2} flexShrink={0} marginTop={1}>
+          <Text color="success">{CHECK}</Text>
+        </Box>
+        <Box flexDirection="column" flexGrow={1}>
+          {row}
+        </Box>
+      </Box>
+      {n >= STREAK_FROM && (
+        <Box key="gr-streak" paddingLeft={4}>
+          <Text color="success" dimColor>{`${n} in a row`}</Text>
+        </Box>
+      )}
+    </Box>
+  )
+
+  // Under each prompt you typed: its fixes, then the natural rewrite. A check before it when clean. Nothing while checking.
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => {
     const row = await next(e)
     const c = checkFor(await read($, checks), e.props.text)
@@ -764,7 +800,7 @@ export const register: Register = (on, options) => {
     }
     const natural = (await read($, isNatural)) ? c.natural ?? null : null
     if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
-      return row
+      return s.clean && c.streak !== undefined ? cleanRow($.ui.resolve(e), row, c.streak) : row
     }
 
     const ui = $.ui.resolve(e)
@@ -781,7 +817,8 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // The desktop app doesn't draw the row above, so there the newest check shows in a band above the prompt. Nothing while checking or when clean.
+  // The desktop app doesn't draw the row above, so there the newest check shows in a band above the prompt. A short
+  // green line when clean (and the clean setting is on). Nothing while checking.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.surface === 'terminal' || s.desktop !== 'band' || e.props.hasSurvey) {
       return next(e)
@@ -791,16 +828,27 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     const natural = (await read($, isNatural)) ? c.natural ?? null : null
-    if (c.status === 'done' && c.fixes.length === 0 && natural === null) {
+    const clean = c.status === 'done' && c.fixes.length === 0 && natural === null
+    if (clean && (!s.clean || c.streak === undefined)) {
       return next(e)
     }
 
     const ui = $.ui.resolve(e)
-    const { Box, Button } = ui
+    const { Box, Button, Text } = ui
+    const n = c.streak ?? 0
     return (
       <Box key="grammar-band" flexDirection="row">
         <Box key="gr-band-lines" flexDirection="column" flexGrow={1}>
-          {linesOf(ui, c, natural, true)}
+          {clean ? (
+            <Box key="gr-ok">
+              <Text>
+                <Text color="success">{`${CHECK} No mistakes`}</Text>
+                {n >= STREAK_FROM && <Text dimColor>{` · ${n} in a row`}</Text>}
+              </Text>
+            </Box>
+          ) : (
+            linesOf(ui, c, natural, true)
+          )}
         </Box>
         <Button key="hide" label="Hide" onPress={() => update($, hiddenId, () => c.id)} />
       </Box>

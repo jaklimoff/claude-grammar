@@ -2,6 +2,12 @@
 
 Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/jaklimoff/claude-grammar/releases) with its section below as the notes. Bump `version` in `.claude-plugin/plugin.json` on every change to what ships: installed copies update only when it changes. How releases work: [CONTRIBUTING.md](CONTRIBUTING.md#versions-and-releases).
 
+## 1.4.0 (2026-10-31)
+
+- A prompt with no mistakes gets a green check before it. From 3 clean prompts in a row, a line under it says how many (`3 in a row`). A fix or a native-speaker line starts the count over; a failed check or another language leaves it as it is. The count is for the session.
+- In the desktop app the band shows `✓ No mistakes` (and the count) for a clean prompt instead of going blank. With `desktop` set to `line` it is a transcript line, with `toast` a short toast; `band` adds no transcript line for it.
+- A `clean` setting (on by default) turns it off.
+
 ## 1.3.0 (2026-10-30)
 
 - The desktop app doesn't draw the line under the prompt, so a check's fixes never showed there. Now the newest check shows in color in a band above the prompt box, drawn like the line under the prompt in the terminal, but with plain icons and one row per fix. A small Hide button hides it until the next check finishes; a clean check shows nothing.

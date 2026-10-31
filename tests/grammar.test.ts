@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { applyFixes, compileIgnore, compileSkip, cut, entriesFrom, mergeLists, parseLists, settingsFrom, wordCount } from '../hooks/config'
 import { BATCH, keepFixes, parseBatch, parseReply, system, typedPart } from '../hooks/check'
-import { checkFor, plainText, usefulNatural } from '../hooks/grammar'
+import { STREAK_FROM, checkFor, cleanText, plainText, usefulNatural } from '../hooks/grammar'
 import { historyText, importWindow, keepable, kindOf, merge, pairsOf, parseHistory, parsePeriod, prune, record, reviewInput, statsText, summaryOf, trendOf, within } from '../hooks/history'
 import type { Period } from '../hooks/history'
 import type { Entry, History, Kind } from '../hooks/history'
@@ -146,22 +146,62 @@ test('each prompt keeps its own fixes, and a longer prompt never takes a shorter
   await $.prompt.submit({ text: `${TYPO} and more` } as never)
   await clock.advance(5)
   expect(await (await mountRow($, TYPO)).find({ key: 'gr-fixes' })).toBeDefined()
-  expect(await (await mountRow($, `${TYPO} and more`)).find({ key: 'grammar' })).toBeUndefined()
+  expect(await (await mountRow($, `${TYPO} and more`)).find({ key: 'gr-fixes' })).toBeUndefined()
 })
 
-test('clean English and other languages add nothing to the row', async ($, on) => {
+test('clean English gets a check before the prompt; other languages add nothing to the row', async ($, on) => {
   const clock = mock.clock(on)
   let reply: unknown = { english: true, fixes: [] }
   haiku(on, () => reply)
 
   await $.prompt.submit({ text: 'looks good to me' } as never)
   await clock.advance(5)
-  expect(await (await mountRow($, 'looks good to me')).find({ key: 'grammar' })).toBeUndefined()
+  const clean = await mountRow($, 'looks good to me')
+  expect((await clean.find({ key: 'gr-ok' }))?.text).toBe('✓')
+  expect(await clean.find({ key: 'prompt' })).toBeDefined()
+  expect(await clean.find({ key: 'gr-fixes' })).toBeUndefined()
+  expect(await clean.find({ key: 'gr-streak' })).toBeUndefined()
 
   reply = { english: false, fixes: [] }
   await $.prompt.submit({ text: 'das ist gut so' } as never)
   await clock.advance(5)
   expect(await (await mountRow($, 'das ist gut so')).find({ key: 'grammar' })).toBeUndefined()
+})
+
+test('clean prompts in a row are counted from 3; a fix or a native-speaker line resets the count', async ($, on) => {
+  const clock = mock.clock(on)
+  const clean = { english: true, fixes: [] }
+  const replies: unknown[] = [clean, clean, clean, 'sorry, no', { english: false, fixes: [] }, clean, FIXES, clean, { ...clean, natural: 'a much better way to say it' }, clean]
+  haiku(on, (n: number) => replies[n - 1])
+  const prompts = replies.map((_, i) => `${TYPO} number ${i + 1}`)
+  for (const text of prompts) {
+    await $.prompt.submit({ text } as never)
+    await clock.advance(5)
+  }
+  const streakOf = async (i: number) => (await (await mountRow($, prompts[i] ?? '')).find({ key: 'gr-streak' }))?.text
+  const marked = async (i: number) => (await (await mountRow($, prompts[i] ?? '')).find({ key: 'gr-ok' })) !== undefined
+  expect(await streakOf(0)).toBeUndefined()
+  expect(await streakOf(1)).toBeUndefined()
+  expect(await streakOf(2)).toBe('3 in a row')
+  // A failed check and another language neither count nor reset.
+  expect(await marked(3)).toBe(false)
+  expect(await marked(4)).toBe(false)
+  expect(await streakOf(5)).toBe('4 in a row')
+  // A fix resets the count.
+  expect(await marked(6)).toBe(false)
+  expect(await marked(7)).toBe(true)
+  expect(await streakOf(7)).toBeUndefined()
+  // So does a native-speaker line, which is not a clean prompt.
+  expect(await marked(8)).toBe(false)
+  expect(await marked(9)).toBe(true)
+})
+
+test('clean off draws no check before a clean prompt', { options: { clean: false } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { english: true, fixes: [] })
+  await $.prompt.submit({ text: 'looks good to me' } as never)
+  await clock.advance(5)
+  expect(await (await mountRow($, 'looks good to me')).find({ key: 'grammar' })).toBeUndefined()
 })
 
 test('a failed check says so in one dim line', async ($, on) => {
@@ -308,7 +348,26 @@ test('desktop off shows nothing there', { options: { desktop: 'off' } }, async (
   expect(mine(toasts)).toEqual([])
 })
 
-test('a clean prompt or another language shows nothing on the desktop', async ($, on) => {
+test('desktop line and toast show a clean prompt; band mode adds no transcript line for it', { options: { desktop: 'line' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { english: true, fixes: [] }, ['desktop'])
+  for (const n of [1, 2, 3]) {
+    await $.prompt.submit({ text: `looks good to me ${n}` } as never)
+    await clock.advance(5)
+  }
+  expect(mine(lines)).toEqual(['✓ no mistakes', '✓ no mistakes', '✓ no mistakes · 3 in a row'])
+})
+
+test('desktop toast shows a clean prompt briefly', { options: { desktop: 'toast' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, { english: true, fixes: [] }, ['desktop'])
+  await $.prompt.submit({ text: 'looks good to me' } as never)
+  await clock.advance(5)
+  expect(mine(toasts)).toEqual(['✓ no mistakes'])
+  expect(mine(lines)).toEqual([])
+})
+
+test('a clean prompt adds no transcript line in band mode, and another language shows nothing on the desktop', async ($, on) => {
   const clock = mock.clock(on)
   let reply: unknown = { english: true, fixes: [] }
   haiku(on, () => reply, ['desktop'])
@@ -390,15 +449,40 @@ test('Hide hides the band until the next check', async ($, on) => {
   expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeDefined()
 })
 
-test('a clean newest check clears the band instead of keeping an older one', async ($, on) => {
+test('a clean newest check replaces an older one in the band with a green check and the streak', async ($, on) => {
   const clock = mock.clock(on)
   haiku(on, (n: number) => (n === 1 ? FIXES : { english: true, fixes: [] }), ['desktop'])
   await $.prompt.submit({ text: TYPO } as never)
   await clock.advance(5)
-  expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeDefined()
+  expect(await (await mountBand($, 'desktop')).find({ key: 'gr-fixes' })).toBeDefined()
+  await $.prompt.submit({ text: 'looks good to me' } as never)
+  await clock.advance(5)
+  const band = await mountBand($, 'desktop')
+  expect(await band.find({ key: 'gr-fixes' })).toBeUndefined()
+  expect((await band.find({ key: 'gr-ok' }))?.text).toBe('✓ No mistakes')
+  expect(await band.find({ key: 'hide' })).toBeDefined()
+  for (const n of [2, 3]) {
+    await $.prompt.submit({ text: `looks good to me ${n}` } as never)
+    await clock.advance(5)
+  }
+  expect((await (await mountBand($, 'desktop')).find({ key: 'gr-ok' }))?.text).toBe('✓ No mistakes · 3 in a row')
+})
+
+test('clean off: a clean newest check clears the band', { options: { clean: false } }, async ($, on) => {
+  const clock = mock.clock(on)
+  haiku(on, (n: number) => (n === 1 ? FIXES : { english: true, fixes: [] }), ['desktop'])
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
   await $.prompt.submit({ text: 'looks good to me' } as never)
   await clock.advance(5)
   expect(await (await mountBand($, 'desktop')).find({ key: 'grammar-band' })).toBeUndefined()
+  expect(mine(lines)).toEqual(['appea → appear (typo)  ·  about → above (wrong word)'])
+})
+
+test('clean text: the streak shows from STREAK_FROM', () => {
+  expect(cleanText(1)).toBe('✓ no mistakes')
+  expect(cleanText(STREAK_FROM - 1)).toBe('✓ no mistakes')
+  expect(cleanText(STREAK_FROM)).toBe(`✓ no mistakes · ${STREAK_FROM} in a row`)
 })
 
 test('plain text: fixes, removals, the reason and the native-speaker line', () => {
@@ -450,7 +534,7 @@ test('ignored words are told to the model and their fixes dropped; skipped promp
   expect(asked.systems[0]).toContain('"appea"')
   // Regex entries are matched locally only.
   expect(asked.systems[0]).not.toContain('ab.ut')
-  expect(await (await mountRow($, TYPO)).find({ key: 'grammar' })).toBeUndefined()
+  expect(await (await mountRow($, TYPO)).find({ key: 'gr-fixes' })).toBeUndefined()
 })
 
 test('a grammar.json that does not parse is reported once and the check goes on', async ($, on) => {
@@ -576,6 +660,7 @@ test('config helpers: settings, lists, words and cuts', () => {
     showWhy: true,
     desktop: 'band',
     history: true,
+    clean: true,
   })
   expect(settingsFrom({ effort: 'max', max_chars: 5, dialect: 'au' })).toMatchObject({ effort: 'low', maxChars: 200, dialect: 'any', desktop: 'band' })
   expect(parseLists('{"ignore": ["a", 3, ""], "other": 1}')).toEqual({ ignore: ['a'], skip: [], history: true })

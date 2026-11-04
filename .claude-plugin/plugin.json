@@ -1,7 +1,7 @@
 {
   "name": "grammar",
-  "version": "1.4.0",
-  "description": "Checks the English of each prompt you send to Claude Code, shows the fixes under it, and keeps them so /grammar stats and /grammar review show the mistakes you make most. Sends each prompt you type to Haiku (one small call per prompt), and the kept fixes to Sonnet when you run /grammar review, through your own Claude Code session",
+  "version": "1.5.0",
+  "description": "Checks the English of each prompt you send to Claude Code, shows the fixes under it, and keeps them so /grammar stats and /grammar review show the mistakes you make most, and /grammar ask answers your questions about them. Sends each prompt you type to Haiku (one small call per prompt), and the kept fixes to Sonnet when you run /grammar review or /grammar ask, through your own Claude Code session",
   "author": {
     "name": "Jack Klimov",
     "url": "https://jack.direct"
@@ -103,6 +103,12 @@
       "type": "boolean",
       "title": "Mark clean prompts",
       "description": "A green check before a prompt with no mistakes, and from 3 in a row, how many in a row. In the desktop app it shows in the band, the transcript line or a toast, as the desktop setting says.",
+      "default": true
+    },
+    "ask_memory": {
+      "type": "boolean",
+      "title": "Remember asks",
+      "description": "/grammar ask remembers the last 5 asks and reviews of the session, so you can ask follow-ups. Off, each ask starts fresh. /grammar ask memory on|off sets this too.",
       "default": true
     }
   },

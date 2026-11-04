@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelApiError, Register, RenderNode } from 'claude-code'
 
-import type { GrammarCheck, GrammarFix, GrammarReview } from '../types'
+import type { GrammarAsk, GrammarCheck, GrammarFix, GrammarReview, GrammarTurn } from '../types'
 import {
   EMPTY,
   applyFixes,
@@ -19,16 +19,23 @@ import {
 import type { Ignore, Lists, Settings } from './config'
 import { keepFixes, parseReply, system, typedPart } from './check'
 import {
+  ASK_MEMORY,
+  ASK_RECENT,
+  ASK_SYSTEM,
   EMPTY_HISTORY,
   KEEP_DAYS,
+  MAX_ANSWER,
   MAX_ENTRIES,
+  MAX_QUESTION,
   REVIEW_FROM,
   REVIEW_SYSTEM,
+  askInput,
   historyText,
   parseHistory,
   parsePeriod,
   record,
   reviewInput,
+  splitAsk,
   statsText,
   summaryOf,
   summaryText,
@@ -41,6 +48,10 @@ const isOn = atom({ plugin: 'grammar', key: 'grammarOn' } as const, true)
 const isNatural = atom({ plugin: 'grammar', key: 'grammarNatural' } as const, true)
 const keepsHistory = atom({ plugin: 'grammar', key: 'grammarHistory' } as const, true)
 const reviews = atom({ plugin: 'grammar', key: 'grammarReviews' } as const, [] as GrammarReview[])
+const asks = atom({ plugin: 'grammar', key: 'grammarAsks' } as const, [] as GrammarAsk[])
+// What follow-ups remember, oldest first: asks and reviews, up to ASK_MEMORY.
+const thread = atom({ plugin: 'grammar', key: 'grammarThread' } as const, [] as GrammarTurn[])
+const askMemory = atom({ plugin: 'grammar', key: 'grammarAskMemory' } as const, true)
 // The latest checks, newest first, each with the prompt it checked.
 const checks = atom({ plugin: 'grammar', key: 'grammarChecks' } as const, [] as GrammarCheck[])
 const lastId = atom({ plugin: 'grammar', key: 'grammarLastId' } as const, 0)
@@ -359,6 +370,9 @@ const USAGE = `/grammar help: this list, and what is on now
 /grammar ignore: the ignore and skip lists, and their files
 /grammar stats [7d|30d|since 2026-10-01]: your most frequent mistakes, from the kept fixes
 /grammar review [7d|30d|since 2026-10-01]: a summary, then advice on them from Sonnet (one call, from ${REVIEW_FROM} fixes)
+/grammar ask [7d|30d|since 2026-10-01] <question>: ask Sonnet about your English, with your fixes at hand (one call)
+/grammar ask list|clear: what follow-ups remember (the last ${ASK_MEMORY} asks and reviews), or forget it
+/grammar ask memory [on|off]: remembering asks for follow-ups
 /grammar history [on|off|clear]: keeping fixes for stats and review
 More settings (model, spelling, minimum words, icons) are under /config.`
 
@@ -416,6 +430,41 @@ const loadHistory = async ($: EngineInterface): Promise<{ path: string; h: Histo
 // that fails fails for every model, so it is not one of them.
 const UNAVAILABLE: ReadonlySet<ModelApiError> = new Set<ModelApiError>(['model_not_found', 'oauth_org_not_allowed'])
 
+type Request = Omit<Parameters<EngineInterface['model']['complete']>[0], 'model'>
+
+/** One call to Sonnet, else the check's own model when Sonnet is not allowed or not available. Why not, when neither answered. */
+const complete = async ($: EngineInterface, s: Settings, request: Request): Promise<{ text: string; model: string } | { refused: string }> => {
+  let refused = ''
+  for (const model of [...new Set(['sonnet', s.model])]) {
+    let r: Awaited<ReturnType<typeof $.model.complete>>
+    try {
+      r = await $.model.complete({ ...request, model })
+    } catch (err) {
+      // Refused before sending (a model the account may not use): try the next.
+      refused = `${model}: ${message(err)}`
+      continue
+    }
+    if (r.isAnswered) {
+      return { text: r.text.trim(), model }
+    }
+    const why = r.reason === 'api-error' ? `api-error (${r.status ?? 'no response'}, ${r.error})` : String(r.reason)
+    refused = `${model}: ${why}`
+    const unavailable = r.reason === 'api-error' && (r.status === 403 || r.status === 404 || UNAVAILABLE.has(r.error))
+    if (!unavailable) {
+      break
+    }
+  }
+  return { refused }
+}
+
+/** Adds an exchange to what follow-ups remember, when they remember: the newest ASK_MEMORY, oldest first. */
+const remember = async ($: EngineInterface, q: string, a: string) => {
+  if (!(await read($, askMemory))) {
+    return
+  }
+  await update($, thread, all => [...all, { q: cut(q, MAX_QUESTION), a: cut(a, MAX_ANSWER) }].slice(-ASK_MEMORY))
+}
+
 /** One model call over the period's grouped fixes: Sonnet, else the check's own model when Sonnet is not allowed. */
 const review = async ($: EngineInterface, s: Settings, words: string) => {
   const loaded = await loadHistory($)
@@ -434,33 +483,110 @@ const review = async ($: EngineInterface, s: Settings, words: string) => {
   }
   const summary = summaryOf(loaded.h, loaded.ignore, period, now)
   const request = { system: REVIEW_SYSTEM, prompt: reviewInput(fixes), maxTokens: 8000, effort: 'medium' as const, timeoutMs: 180000 }
-  let refused = ''
-  for (const model of [...new Set(['sonnet', s.model])]) {
-    let r: Awaited<ReturnType<typeof $.model.complete>>
-    try {
-      r = await $.model.complete({ ...request, model })
-    } catch (err) {
-      // Refused before sending (a model the account may not use): try the next.
-      refused = `${model}: ${message(err)}`
-      continue
-    }
-    if (r.isAnswered) {
-      return shown($, summary, r.text.trim(), model)
-    }
-    const why = r.reason === 'api-error' ? `api-error (${r.status ?? 'no response'}, ${r.error})` : String(r.reason)
-    refused = `${model}: ${why}`
-    const unavailable = r.reason === 'api-error' && (r.status === 403 || r.status === 404 || UNAVAILABLE.has(r.error))
-    if (!unavailable) {
-      break
-    }
+  const r = await complete($, s, request)
+  if ('refused' in r) {
+    return `No review: ${r.refused}`
   }
-  return `No review: ${refused}`
+  await remember($, `/grammar review ${words}`.trim(), r.text)
+  return shown($, summary, r.text, r.model, await read($, askMemory))
 }
 
 /** A review's row text (the summary, the advice, who wrote it), kept so the row can draw it as a panel. */
-const shown = async ($: EngineInterface, summary: Summary, advice: string, model: string) => {
-  const text = `${summaryText(summary)}\n\n${advice}\n\n(${model}, from ${summary.fixes} fixes)`
-  await update($, reviews, all => [{ text, summary, advice, model }, ...all].slice(0, 10))
+const shown = async ($: EngineInterface, summary: Summary, advice: string, model: string, followUp: boolean) => {
+  const hint = followUp ? '\n/grammar ask <question> follows up on this review.' : ''
+  const text = `${summaryText(summary)}\n\n${advice}\n\n(${model}, from ${summary.fixes} fixes)${hint}`
+  await update($, reviews, all => [{ text, summary, advice, model, followUp }, ...all].slice(0, 10))
+  return text
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** What follow-ups remember, one exchange per item, oldest first; or that nothing is, or that they don't. */
+const askList = async ($: EngineInterface) => {
+  if (!(await read($, askMemory))) {
+    return 'Ask memory: off. Each /grammar ask starts fresh. /grammar ask memory on remembers asks for follow-ups.'
+  }
+  const turns = await read($, thread)
+  if (turns.length === 0) {
+    return `Ask memory: on, nothing remembered yet. Each /grammar ask and /grammar review is remembered for follow-ups, the last ${ASK_MEMORY}.`
+  }
+  const short = (t: string) => {
+    const line = t.replace(/\s+/g, ' ').trim()
+    return line.length > 90 ? `${cut(line, 90)}…` : line
+  }
+  return [
+    `Ask memory: on. Follow-ups remember ${plural(turns.length, 'exchange')}, oldest first (the last ${ASK_MEMORY} are kept):`,
+    ...turns.map((t, i) => `${i + 1}. ${short(t.q)}\n   ${short(t.a)}`),
+    '/grammar ask clear forgets them; /grammar ask memory off stops remembering. Gone when the session ends.',
+  ].join('\n')
+}
+
+const askCommand = async ($: EngineInterface, s: Settings, words: string) => {
+  const w = words.trim()
+  const lower = w.toLowerCase()
+  if (lower === '' || lower === 'help') {
+    const how = `/grammar ask [7d|30d|since 2026-10-01] <question>: ask Sonnet about your English, with your kept fixes at hand.\n/grammar ask list|clear, /grammar ask memory on|off.`
+    return `${how}\n\n${await askList($)}`
+  }
+  if (lower === 'list') {
+    return askList($)
+  }
+  if (lower === 'clear') {
+    const n = (await read($, thread)).length
+    await update($, thread, () => [])
+    return n === 0 ? 'Nothing remembered, nothing to forget.' : `Forgot ${plural(n, 'exchange')}: the next /grammar ask starts fresh.`
+  }
+  const memory = /^memory(?:\s+(on|off))?$/.exec(lower)
+  if (memory !== null) {
+    const want = memory[1] === 'on' ? true : memory[1] === 'off' ? false : !(await read($, askMemory))
+    const n = (await read($, thread)).length
+    await update($, askMemory, () => want)
+    if (!want) {
+      await update($, thread, () => [])
+    }
+    const why = await persist($, 'ask_memory', want)
+    return (
+      (want
+        ? `Ask memory on: follow-ups remember the last ${ASK_MEMORY} asks and reviews of the session. /grammar ask list shows them.`
+        : `Ask memory off: each /grammar ask starts fresh${n > 0 ? `, and the ${plural(n, 'remembered exchange')} ${n === 1 ? 'is' : 'are'} forgotten` : ''}.`) +
+      sessionOnly(why)
+    )
+  }
+  const now = await $.clock.now()
+  const split = splitAsk(w, now)
+  if (typeof split === 'string') {
+    return split
+  }
+  if (split.question === '') {
+    return 'Ask what? /grammar ask 7d which prepositions do I mix up?'
+  }
+  const question = cut(split.question, MAX_QUESTION)
+  // An unreadable history leaves the question without the kept fixes; the answer says when there are none.
+  const loaded = await loadHistory($).catch(() => 'unreadable')
+  const fixes = typeof loaded === 'string' ? [] : visible(within(loaded.h, split.period), loaded.ignore)
+  const recent = (await read($, checks)).flatMap(c => (c.status === 'done' ? c.fixes : [])).slice(0, ASK_RECENT)
+  const on = await read($, askMemory)
+  const turns = on ? await read($, thread) : []
+  const request = {
+    system: ASK_SYSTEM,
+    prompt: askInput(fixes, split.period.label, recent, turns, question),
+    maxTokens: 4000,
+    effort: 'low' as const,
+    timeoutMs: 120000,
+  }
+  const r = await complete($, s, request)
+  if ('refused' in r) {
+    return `No answer: ${r.refused}`
+  }
+  await remember($, question, r.text)
+  const memoryNote = !on
+    ? 'memory off, each ask starts fresh'
+    : turns.length === 0
+      ? 'follow-ups remember this · /grammar ask clear forgets'
+      : `remembered ${turns.length} earlier · /grammar ask list, clear`
+  const footer = `${r.model}, from ${plural(fixes.length, 'fix', 'fixes')} · ${memoryNote}`
+  const text = `${r.text}\n\n(${footer})`
+  await update($, asks, all => [{ text, answer: r.text, footer }, ...all].slice(0, 20))
   return text
 }
 
@@ -516,13 +642,15 @@ export const register: Register = (on, options) => {
     await update($, isOn, () => moved.enabled ?? s.enabled)
     await update($, isNatural, () => moved.natural ?? s.natural)
     await update($, keepsHistory, () => s.history)
+    await update($, askMemory, () => s.askMemory)
     if (s.history) {
       await announceHistory($).catch(() => undefined)
     }
     await $.command.register({
       name: 'grammar',
-      description: 'The English check of your prompts: /grammar on|off, /grammar stats, /grammar review, /grammar ignore add|rm <words>, /grammar help',
-      argumentHint: '[help|on|off|natural|ignore|stats|review|history]',
+      description:
+        'The English check of your prompts: /grammar on|off, /grammar stats, /grammar review, /grammar ask <question>, /grammar ignore add|rm <words>, /grammar help',
+      argumentHint: '[help|on|off|natural|ignore|stats|review|ask|history]',
     })
 
     return next(e)
@@ -541,6 +669,9 @@ export const register: Register = (on, options) => {
           `Check: ${check}. Natural line: ${(await read($, isNatural)) ? 'on' : 'off'}.`,
           `Model: ${s.model}, effort ${s.effort}, spelling ${s.dialect}, at least ${s.minWords} words, up to ${s.maxChars} characters.`,
           await historyLine($),
+          (await read($, askMemory))
+            ? `Ask memory: on, ${plural((await read($, thread)).length, 'exchange')} remembered (/grammar ask list).`
+            : 'Ask memory: off.',
         ]
         return { text: `${now.join('\n')}\n\n${USAGE}` }
       }
@@ -573,6 +704,9 @@ export const register: Register = (on, options) => {
       }
       case 'review':
         return { text: await review($, s, rest.join(' ')) }
+      case 'ask':
+        // The question as typed, line breaks and spacing kept.
+        return { text: await askCommand($, s, e.args.trim().slice(first.length)) }
       case 'history': {
         if (sub !== '' && sub !== 'on' && sub !== 'off' && sub !== 'clear') {
           return { text: USAGE }
@@ -615,20 +749,8 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // A review's row: the summary as a card, then the advice with each example drawn like a fix.
-  on('ui.render', { component: 'CommandOutput', props: { command: 'grammar' } }, async ($, e, next) => {
-    const row = await next(e)
-    const text = e.props.text.trim()
-    const r = (await read($, reviews)).find(x => text === x.text.trim() || text.endsWith(x.text.trim()))
-    if (r === undefined) {
-      return row
-    }
-    const { Box, Text } = $.ui.resolve(e)
-    const m = r.summary
-    const BAR = 15
-    const [full, empty] = s.icons ? ['█', '░'] : ['#', '.']
-    const most = Math.max(1, ...m.kinds.map(k => k.n))
-    const width = Math.max(0, ...m.kinds.slice(0, 3).map(k => k.kind.length))
+  /** Advice or an answer, line by line: numbered lines bold, each "wrong → right" line struck through and fixed. */
+  const adviceOf = ({ Box, Text }: ReturnType<EngineInterface['ui']['resolve']>, advice: string) => {
     const fix = (from: string, to: string, key: string) => (
       <Text key={key}>
         <Text color="error" strikethrough>
@@ -637,6 +759,68 @@ export const register: Register = (on, options) => {
         <Text color="success">{` ${to === '' ? '(drop it)' : to}`}</Text>
       </Text>
     )
+    return {
+      fix,
+      lines: advice.split('\n').map((line, i) => {
+        const key = `gr-rule-${i}`
+        const example = /^\s*(.+?)\s+→\s+(.*?)\s*$/.exec(line)
+        if (/^\s*\d+[.)]\s/.test(line)) {
+          return (
+            <Text key={key} bold wrap="wrap">
+              {line.trim()}
+            </Text>
+          )
+        }
+        if (example !== null) {
+          return (
+            <Box key={key} paddingLeft={3}>
+              {fix(example[1] ?? '', example[2] ?? '', `${key}-fix`)}
+            </Box>
+          )
+        }
+        return (
+          <Text key={key} wrap="wrap">
+            {line.trim() === '' ? ' ' : line.trim()}
+          </Text>
+        )
+      }),
+    }
+  }
+
+  // A review's row: the summary as a card, then the advice with each example drawn like a fix. An ask's row: the answer drawn the same way.
+  on('ui.render', { component: 'CommandOutput', props: { command: 'grammar' } }, async ($, e, next) => {
+    const row = await next(e)
+    const text = e.props.text.trim()
+    const matches = (x: { text: string }) => text === x.text.trim() || text.endsWith(x.text.trim())
+    const a = (await read($, asks)).find(matches)
+    if (a !== undefined) {
+      const ui = $.ui.resolve(e)
+      const { Box, Text } = ui
+      return (
+        <Box key="grammar-ask" flexDirection="column">
+          <Box key="gr-answer" flexDirection="column">
+            {adviceOf(ui, a.answer).lines}
+          </Box>
+          <Box key="gr-footer" marginTop={1}>
+            <Text dimColor wrap="wrap">
+              {a.footer}
+            </Text>
+          </Box>
+        </Box>
+      )
+    }
+    const r = (await read($, reviews)).find(matches)
+    if (r === undefined) {
+      return row
+    }
+    const ui = $.ui.resolve(e)
+    const { Box, Text } = ui
+    const m = r.summary
+    const BAR = 15
+    const [full, empty] = s.icons ? ['█', '░'] : ['#', '.']
+    const most = Math.max(1, ...m.kinds.map(k => k.n))
+    const width = Math.max(0, ...m.kinds.slice(0, 3).map(k => k.kind.length))
+    const { fix, lines: advice } = adviceOf(ui, r.advice)
     const card = (
       <Box key="gr-panel" flexDirection="column" borderStyle="round" borderColor="suggestion" paddingX={1} alignSelf="flex-start">
         <Text key="gr-p-title">
@@ -671,30 +855,6 @@ export const register: Register = (on, options) => {
         )}
       </Box>
     )
-    const advice = r.advice.split('\n').map((line, i) => {
-      const key = `gr-rule-${i}`
-      const example = /^\s*(.+?)\s+→\s+(.*?)\s*$/.exec(line)
-      if (/^\s*\d+[.)]\s/.test(line)) {
-        return (
-          <Text key={key} bold wrap="wrap">
-            {line.trim()}
-          </Text>
-        )
-      }
-      if (example !== null) {
-        return (
-          <Box key={key} paddingLeft={3}>
-            {fix(example[1] ?? '', example[2] ?? '', `${key}-fix`)}
-          </Box>
-        )
-      }
-      return (
-        <Text key={key} wrap="wrap">
-          {line.trim() === '' ? ' ' : line.trim()}
-        </Text>
-      )
-    })
-
     return (
       <Box key="grammar-review" flexDirection="column">
         {card}
@@ -702,7 +862,7 @@ export const register: Register = (on, options) => {
           {advice}
         </Box>
         <Box key="gr-footer">
-          <Text dimColor>{`${r.model}, from ${m.fixes} fixes`}</Text>
+          <Text dimColor>{`${r.model}, from ${m.fixes} fixes${r.followUp === true ? ' · /grammar ask <question> follows up' : ''}`}</Text>
         </Box>
       </Box>
     )

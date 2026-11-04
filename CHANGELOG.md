@@ -2,6 +2,12 @@
 
 Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/jaklimoff/claude-grammar/releases) with its section below as the notes. Bump `version` in `.claude-plugin/plugin.json` on every change to what ships: installed copies update only when it changes. How releases work: [CONTRIBUTING.md](CONTRIBUTING.md#versions-and-releases).
 
+## 1.5.0 (2026-11-04)
+
+- `/grammar ask [period] <question>`: ask Sonnet anything about your English. One call with the question, the period's grouped fixes and this session's latest fixes; examples are drawn like a review's. No minimum of kept fixes. Falls back to your `model` setting when Sonnet isn't allowed or available, like the review.
+- Follow-ups: the session remembers the last 5 asks and reviews and sends them with each ask. The line under each answer says what was remembered. `/grammar ask list` shows it, `/grammar ask clear` forgets it, and `/grammar ask memory on|off` (the `ask_memory` setting, on by default) switches it. A review says when an ask can follow up on it.
+- The review and the ask share one model call with the fallback.
+
 ## 1.4.0 (2026-10-31)
 
 - A prompt with no mistakes gets a green check before it. From 3 clean prompts in a row, a line under it says how many (`3 in a row`). A fix or a native-speaker line starts the count over; a failed check or another language leaves it as it is. The count is for the session.

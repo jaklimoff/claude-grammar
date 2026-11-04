@@ -55,11 +55,15 @@ A prompt with no mistakes gets a green `✓` before it instead. From the third c
 | `/grammar ignore` | Shows the ignore and skip lists and the files they're in. |
 | `/grammar stats [period]` | Your mistakes by kind, the fixes you keep repeating, and whether you're making fewer. No model call. |
 | `/grammar review [period]` | A summary card, then the 3 to 5 habits behind most of your mistakes from one Sonnet call, with your own fixes as examples. Needs 20 kept fixes in the period. |
+| `/grammar ask [period] <question>` | Ask Sonnet anything about your English, with your kept fixes and this session's latest fixes at hand. One call. |
+| `/grammar ask list` | What follow-ups remember: the last 5 asks and reviews of the session. |
+| `/grammar ask clear` | Forgets them, so the next ask starts fresh. |
+| `/grammar ask memory on\|off` | Remembers asks for follow-ups, or not. |
 | `/grammar history on\|off` | Keeps your fixes, or stops keeping new ones. |
 | `/grammar history clear` | Empties the history file. |
 | `/grammar history` | Shows whether it's on, how many fixes are kept, and where. |
 
-A period is `7d` or `30d` (the last N days, today included), or `since 2026-10-01`. Without one, both commands cover everything kept. Days are UTC dates.
+A period is `7d` or `30d` (the last N days, today included), or `since 2026-10-01`. Without one, `stats`, `review` and `ask` cover everything kept. Days are UTC dates.
 
 The on/off switches are settings, so they last across sessions and show under `/config` too.
 
@@ -81,6 +85,7 @@ Under `/config`, or in `settings.json` under `pluginConfigs` → `grammar@gramma
 | `desktop` | `band` | `band`, `line`, `toast` or `off`. The desktop app doesn't draw the line under the prompt: `band` shows the newest check in color in a band above the prompt box (with a Hide button) and also adds the dim transcript line, `line` only the transcript line, `toast` shows them briefly as a toast, `off` shows nothing there. |
 | `clean` | `true` | A green `✓` before a prompt with no mistakes, and from 3 in a row, how many in a row. In the desktop app it shows as `desktop` says: in the band, as a transcript line (`line` only), or as a short toast. |
 | `history` | `true` | Keeps each fix for `/grammar stats` and `/grammar review`. Same as `/grammar history on\|off`. |
+| `ask_memory` | `true` | `/grammar ask` remembers the last 5 asks and reviews of the session for follow-ups. Same as `/grammar ask memory on\|off`. |
 
 ## Ignore and skip lists
 
@@ -160,6 +165,30 @@ The row also holds the same as plain text, which is what the model sees in the c
 
 When your account can't use Sonnet, it asks the model in your `model` setting instead. Words you add to the ignore list later drop out of both commands, and stats count fixes the same however you capitalized or spaced them.
 
+### Ask about your English
+
+`/grammar ask` takes any question about your English and answers it from one Sonnet call, using your own fixes as examples when they show the point:
+
+```
+/grammar ask why do I keep dropping "the"?
+/grammar ask 30d which prepositions do I mix up most?
+/grammar ask is "I have done it yesterday" wrong?
+```
+
+The call sends the question, the period's grouped fixes (the same lines as `/grammar review`; no period means everything kept), and the fixes from this session's latest prompts, at most 10. It needs no minimum of kept fixes: with few or none, the answer says so and stays general. Examples come out like a review's, struck through in red with the fix in green.
+
+Follow-ups work. The session remembers the last 5 asks and reviews, and each ask sends them along, so `/grammar ask explain the second one more` after a review knows which one you mean. The line under each answer says what it remembered:
+
+```
+sonnet, from 63 fixes · remembered 2 earlier · /grammar ask list, clear
+```
+
+- `/grammar ask list` shows what is remembered, oldest first.
+- `/grammar ask clear` forgets it; the next ask starts fresh.
+- `/grammar ask memory off` (or the `ask_memory` setting) forgets it and stops remembering, so each ask starts fresh.
+
+What is remembered lives in the session's memory only and is gone when the session ends. A failed ask is not remembered. When your account can't use Sonnet, it asks the model in your `model` setting instead, the same way the review does.
+
 ### Import your past prompts
 
 The history starts with your next prompt, but Claude Code's transcripts still hold the prompts you typed before. `tools/import-history.ts` checks those with the plugin's own prompt and adds their fixes, each with the time the prompt was sent:
@@ -178,7 +207,7 @@ bun tools/import-history.ts --days 30       # the last 30 days (default 7, at mo
 
 ## Privacy and cost
 
-Each prompt you type (its first 6000 characters by default, pasted text included) goes to Haiku (or the model you set) through Claude Code's own model access, on the same account and provider as the rest of your session. That is one small call per prompt (Haiku at low effort, unless you change `model` or `effort`), counted in your usage like any other call. `/grammar review`, only when you run it, sends your grouped fixes (not your prompts) to Sonnet the same way. Nothing goes anywhere else.
+Each prompt you type (its first 6000 characters by default, pasted text included) goes to Haiku (or the model you set) through Claude Code's own model access, on the same account and provider as the rest of your session. That is one small call per prompt (Haiku at low effort, unless you change `model` or `effort`), counted in your usage like any other call. `/grammar review`, only when you run it, sends your grouped fixes (not your prompts) to Sonnet the same way. `/grammar ask`, only when you run it, sends your question, your grouped fixes, the fixes from this session's latest prompts and the remembered asks and answers. Nothing goes anywhere else.
 
 The fixes are kept on your disk in `grammar-history.json` (see [Your mistakes over time](#your-mistakes-over-time)). They are short bits of what you typed, from every project. `/grammar history off` stops keeping them, `/grammar history clear` empties the file, and `"history": false` in a project's `.claude/grammar.json` keeps nothing from that project.
 
@@ -198,9 +227,9 @@ A mod is code that runs inside Claude Code with your permissions, so read it bef
 
 | API | For |
 |---|---|
-| `$.model.complete` | The Haiku call, and the Sonnet call of `/grammar review`. |
-| `$.state` | The checks and reviews, in memory for the session. |
-| `$.config.list`, `$.config.set` | Finding the settings' keys, and saving `/grammar on\|off`, `natural on\|off` and `history on\|off` as settings. |
+| `$.model.complete` | The Haiku call, and the Sonnet calls of `/grammar review` and `/grammar ask`. |
+| `$.state` | The checks, reviews, asks and what follow-ups remember, in memory for the session. |
+| `$.config.list`, `$.config.set` | Finding the settings' keys, and saving `/grammar on\|off`, `natural on\|off`, `history on\|off` and `ask memory on\|off` as settings. |
 | `$.store` | Reading and clearing where 1.0 kept the two switches, once, and noting that the history notice has shown. |
 | `$.command.register` | `/grammar`. |
 | `$.fs.exists`, `$.fs.read`, `$.fs.write`, `$.env.get`, `$.session.root` | Finding and reading your `grammar.json` files, and keeping `grammar-history.json`. Writes go only to two files in your Claude Code folder: the global `grammar.json` on `/grammar ignore add\|rm`, and the history after each check and on `/grammar history clear`. |
@@ -220,7 +249,7 @@ No other files, no processes, no other network. `claude plugin validate .` print
 
 ## How it works
 
-The plugin is four files: `hooks/grammar.tsx` (the hooks, commands and drawing), `hooks/check.ts` (the check's prompt and the reply's parsing), `hooks/config.ts` (settings and ignore lists) and `hooks/history.ts` (the kept fixes, stats and the review's prompt). `tools/import-history.ts` uses the same `check.ts` and `history.ts` outside Claude Code. It is a Claude Code mod: a plugin whose `hooks/hooks.json` lists a module that runs inside Claude Code ([mods docs](https://code.claude.com/docs/en/plugins/mods/overview)). It hooks these events:
+The plugin is four files: `hooks/grammar.tsx` (the hooks, commands and drawing), `hooks/check.ts` (the check's prompt and the reply's parsing), `hooks/config.ts` (settings and ignore lists) and `hooks/history.ts` (the kept fixes, stats, and the review's and ask's prompts). `tools/import-history.ts` uses the same `check.ts` and `history.ts` outside Claude Code. It is a Claude Code mod: a plugin whose `hooks/hooks.json` lists a module that runs inside Claude Code ([mods docs](https://code.claude.com/docs/en/plugins/mods/overview)). It hooks these events:
 
 | Event | What it does |
 |---|---|
@@ -229,7 +258,7 @@ The plugin is four files: `hooks/grammar.tsx` (the hooks, commands and drawing),
 | `prompt.submit` | Queues a check of the prompt on a timer, so the prompt is never held up, and passes it on unchanged. Once the check is drawn, its fixes go into the history. |
 | `ui.render` (`UserMessage`) | Draws the fixes and the native-speaker line under the transcript row of the prompt they belong to. |
 | `ui.render` (`AbovePrompt`) | Draws the newest check's fixes in a band above the prompt box in the desktop app, with a Hide button (the `desktop` setting). |
-| `ui.render` (`CommandOutput`) | Draws the `/grammar review` card in place of its plain text. |
+| `ui.render` (`CommandOutput`) | Draws the `/grammar review` card and `/grammar ask` answers in place of their plain text. |
 
 The check asks Haiku for JSON:
 

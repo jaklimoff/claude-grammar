@@ -8,11 +8,13 @@ Each prompt you type in Claude Code (its first 6000 characters by default, the `
 
 `/grammar review`, only when you type it, sends the fixes the plugin has kept (grouped, with counts; not your prompts) to Sonnet the same way, or to your `model` setting when your account can't use Sonnet.
 
+`/grammar ask`, only when you type it, sends your question, the kept fixes for the period (grouped, with counts), the fixes from this session's latest prompts (at most 10; not the prompts), and, while ask memory is on, the session's last 5 asks and reviews with their answers, to Sonnet the same way, or to your `model` setting when your account can't use Sonnet.
+
 Nothing is sent anywhere else: the plugin makes no other network requests and starts no processes.
 
 ## What it keeps
 
-- The checks (each prompt's text and its fixes) live in Claude Code's session state, in memory, and are gone when the session ends.
+- The checks (each prompt's text and its fixes) live in Claude Code's session state, in memory, and are gone when the session ends. So do the reviews and asks shown, and the last 5 asks and reviews that `/grammar ask` remembers for follow-ups; `/grammar ask clear` forgets those sooner, and `/grammar ask memory off` (the `ask_memory` setting) stops remembering them.
 - Each fix is also kept on your disk in `grammar-history.json` in your Claude Code folder (`~/.claude/`, or `$CLAUDE_CONFIG_DIR`), for `/grammar stats` and `/grammar review`. A kept fix holds the words you typed that it corrects, the correction, a short reason, the kind of mistake and the time. There's also a count per day of prompts checked and prompts with a fix. These are short bits of what you typed, from every project you use Claude Code in. The prompt itself is not kept, and neither is the native-speaker rewrite. Fixes over 60 characters, fixes that only change case, fixes that look like code or a path, and fixes for words on your ignore list are dropped. The file keeps 90 days and at most 2000 fixes. The first session that keeps fixes starts with a notice naming the file; the plugin's own store notes that it has shown, so it shows once.
 - `tools/import-history.ts`, only if you run it, reads the prompts you typed in Claude Code's transcripts and the plugin's options in `settings.json` (both in your Claude Code folder), sends them through `claude -p` on your own login to be checked, and adds their fixes to the same file.
 - `/grammar history off` (or the `history` setting) stops keeping fixes. `/grammar history clear` empties the file, and you can delete it yourself. `"history": false` in a project's `.claude/grammar.json` keeps nothing while you work in that project.

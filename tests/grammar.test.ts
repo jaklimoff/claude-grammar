@@ -5,7 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import { applyFixes, compileIgnore, compileSkip, cut, entriesFrom, mergeLists, parseLists, settingsFrom, wordCount } from '../hooks/config'
 import { BATCH, keepFixes, parseBatch, parseReply, system, typedPart } from '../hooks/check'
 import { STREAK_FROM, checkFor, cleanText, plainText, usefulNatural } from '../hooks/grammar'
-import { historyText, importWindow, keepable, kindOf, merge, pairsOf, parseHistory, parsePeriod, prune, record, reviewInput, statsText, summaryOf, trendOf, within } from '../hooks/history'
+import { ASK_MEMORY, askInput, historyText, importWindow, keepable, kindOf, merge, pairsOf, parseHistory, parsePeriod, prune, record, reviewInput, splitAsk, statsText, summaryOf, trendOf, within } from '../hooks/history'
 import type { Period } from '../hooks/history'
 import type { Entry, History, Kind } from '../hooks/history'
 import { batches, typedText } from '../tools/transcript'
@@ -304,6 +304,8 @@ test('/grammar help lists the commands and what is on now', { options: { model: 
   expect(help.text).toContain('Check: on.')
   expect(help.text).toContain('Model: sonnet')
   expect(help.text).toContain('/grammar ignore add')
+  expect(help.text).toContain('/grammar ask list|clear')
+  expect(help.text).toContain('Ask memory: on, 0 exchanges remembered (/grammar ask list).')
 
   await $.command.run({ command: 'grammar', args: 'off' } as never)
   expect((await $.command.run({ command: 'grammar', args: 'help' } as never)).text).toContain('Check: off.')
@@ -661,6 +663,7 @@ test('config helpers: settings, lists, words and cuts', () => {
     desktop: 'band',
     history: true,
     clean: true,
+    askMemory: true,
   })
   expect(settingsFrom({ effort: 'max', max_chars: 5, dialect: 'au' })).toMatchObject({ effort: 'low', maxChars: 200, dialect: 'any', desktop: 'band' })
   expect(parseLists('{"ignore": ["a", 3, ""], "other": 1}')).toEqual({ ignore: ['a'], skip: [], history: true })
@@ -1149,4 +1152,164 @@ test('/grammar review 7d reviews only that week and opens with a summary card', 
   expect(await (await mountOutput($, 'help', 'Check: on.')).find({ key: 'gr-panel' })).toBeUndefined()
   expect((await $.command.run({ command: 'grammar', args: 'review 1d' } as never)).text).toContain('Try a longer period')
   expect((await $.command.run({ command: 'grammar', args: 'review someday' } as never)).text).toContain('7d, 30d')
+})
+
+const ask = async ($: Engine, args: string) => (await $.command.run({ command: 'grammar', args: `ask ${args}` } as never)).text ?? ''
+
+test('/grammar ask answers with no fixes kept, from Sonnet, and draws its examples like fixes', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const asked = haiku(on, 'Use "the" for a thing you named before.\n  a file → the file')
+  const text = await ask($, 'when do I use "the"?')
+  expect(asked.models).toEqual(['sonnet'])
+  expect(asked.systems[0]).toContain('answer their questions about English')
+  expect(asked.prompts[0]).toContain('Their kept fixes (everything kept): none kept.')
+  expect(asked.prompts[0]).toContain('Their question: when do I use "the"?')
+  expect(asked.prompts[0]).not.toContain('Earlier in this conversation')
+  expect(text).toContain('Use "the" for a thing you named before.')
+  expect(text).toContain('(sonnet, from 0 fixes · follow-ups remember this · /grammar ask clear forgets)')
+
+  const row = await mountOutput($, 'ask when do I use "the"?', text)
+  const answer = (await row.find({ key: 'gr-answer' }))?.text ?? ''
+  expect(answer).toContain('a file the file')
+  expect(answer).not.toContain('→')
+  expect((await row.find({ key: 'gr-footer' }))?.text).toContain('follow-ups remember this')
+  expect(await row.find({ key: 'gr-panel' })).toBeUndefined()
+})
+
+test('/grammar ask follow-ups remember earlier asks and reviews; list shows them and clear forgets', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const asked = haiku(on, (n: number) => `answer ${n}`, undefined, {
+    [HISTORY_FILE]: historyText(seeded([['depend from', 'depend on', 'preposition', 25]])),
+  })
+  expect(await ask($, 'list')).toContain('nothing remembered yet')
+  const review = (await $.command.run({ command: 'grammar', args: 'review' } as never)).text ?? ''
+  expect(review).toContain('/grammar ask <question> follows up on this review.')
+  const first = await ask($, 'why "depend on"?')
+  expect(asked.prompts[1]).toContain('25× depend from → depend on (preposition)')
+  expect(asked.prompts[1]).toContain('Q: /grammar review\nA: answer 1')
+  expect(first).toContain('remembered 1 earlier · /grammar ask list, clear')
+  await ask($, 'and "rely on"?')
+  expect(asked.prompts[2]).toContain('Q: /grammar review\nA: answer 1\n\nQ: why "depend on"?\nA: answer 2')
+
+  const list = await ask($, 'list')
+  expect(list).toContain('Follow-ups remember 3 exchanges, oldest first')
+  expect(list).toContain('1. /grammar review\n   answer 1')
+  expect(list).toContain('3. and "rely on"?\n   answer 3')
+  expect(list).toContain('/grammar ask clear forgets them')
+
+  // Only the newest ASK_MEMORY are kept.
+  for (let i = 0; i < ASK_MEMORY; i++) {
+    await ask($, `question ${i}`)
+  }
+  expect(await ask($, 'list')).not.toContain('/grammar review')
+  expect(await ask($, 'list')).toContain(`Follow-ups remember ${ASK_MEMORY} exchanges`)
+
+  expect(await ask($, 'clear')).toBe(`Forgot ${ASK_MEMORY} exchanges: the next /grammar ask starts fresh.`)
+  expect(await ask($, 'clear')).toBe('Nothing remembered, nothing to forget.')
+  await ask($, 'fresh one?')
+  expect(asked.prompts.at(-1)).not.toContain('Earlier in this conversation')
+  // A question that only starts with a subcommand's word is still a question.
+  await ask($, 'clear or clean?')
+  expect(asked.prompts.at(-1)).toContain('Their question: clear or clean?')
+})
+
+test('/grammar ask memory off saves the setting, forgets, and each ask starts fresh', async ($, on) => {
+  const sets: unknown[] = []
+  on('config.set', ($, e) => {
+    sets.push({ key: e.key, value: e.value })
+    return { value: e.value } as never
+  })
+  mock.clock(on, { now: NOW })
+  const asked = haiku(on, 'an answer')
+  await ask($, 'first?')
+  expect(await ask($, 'memory off')).toBe('Ask memory off: each /grammar ask starts fresh, and the 1 remembered exchange is forgotten.')
+  expect(sets).toEqual([{ key: 'grammar.ask_memory', value: false }])
+  await ask($, 'second?')
+  const third = await ask($, 'third?')
+  expect(asked.prompts[2]).not.toContain('Earlier in this conversation')
+  expect(third).toContain('memory off, each ask starts fresh')
+  expect(await ask($, 'list')).toContain('Ask memory: off.')
+  expect((await $.command.run({ command: 'grammar', args: 'help' } as never)).text).toContain('Ask memory: off.')
+
+  expect(await ask($, 'memory')).toContain('Ask memory on')
+  expect(sets.at(-1)).toEqual({ key: 'grammar.ask_memory', value: true })
+  await ask($, 'fourth?')
+  await ask($, 'fifth?')
+  expect(asked.prompts.at(-1)).toContain('Q: fourth?')
+})
+
+test('ask memory off in the settings remembers nothing, reviews included', { options: { ask_memory: false } }, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const asked = haiku(on, 'advice', undefined, { [HISTORY_FILE]: historyText(seeded([['depend from', 'depend on', 'preposition', 25]])) })
+  await $.session.start({} as never)
+  const review = (await $.command.run({ command: 'grammar', args: 'review' } as never)).text ?? ''
+  expect(review).not.toContain('/grammar ask')
+  await ask($, 'why?')
+  expect(asked.prompts[1]).not.toContain('Earlier in this conversation')
+  expect(await ask($, 'list')).toContain('Ask memory: off.')
+})
+
+test('/grammar ask takes a period first, sends this session\'s latest fixes, and says what it needs', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const old = Array.from({ length: 5 }, () => entry('teh', 'the', 'spelling', NOW - 20 * DAY))
+  const week = Array.from({ length: 3 }, () => entry('a file', 'the file', 'article', NOW - DAY))
+  const asked = haiku(on, (n: number) => (n === 1 ? FIXES : 'answer'), undefined, {
+    [HISTORY_FILE]: historyText({ version: 1, fixes: [...old, ...week], days: [] }),
+  })
+  await $.prompt.submit({ text: TYPO } as never)
+  await clock.advance(5)
+
+  const text = await ask($, '7d which articles do I miss?')
+  expect(asked.models.at(-1)).toBe('sonnet')
+  const prompt = asked.prompts.at(-1) ?? ''
+  // The week's 3 kept fixes and the 2 the prompt above just added.
+  expect(prompt).toContain('Their kept fixes (last 7 days): \n5 fixes.')
+  expect(prompt).toContain('3× a file → the file (article)')
+  expect(prompt).not.toContain('teh')
+  expect(prompt).toContain('Fixes in their latest prompts, newest first:\nappea → appear (typo)\nabout → above (wrong word)')
+  expect(prompt).toContain('Their question: which articles do I miss?')
+  expect(text).toContain('from 5 fixes')
+
+  const calls = asked.prompts.length
+  expect(await ask($, '')).toContain('/grammar ask [7d|30d|since 2026-10-01] <question>')
+  expect(await ask($, '7d')).toContain('Ask what?')
+  expect(await ask($, '500d why?')).toContain('pick 1d to 90d')
+  expect(asked.prompts.length).toBe(calls)
+})
+
+test('/grammar ask falls back to the check\'s model and says why when nothing answered', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const models: string[] = []
+  let sonnet = true
+  on('model.complete', ($, e) => {
+    models.push(e.model)
+    if (e.model === 'sonnet' || !sonnet) {
+      return { value: { isAnswered: false, reason: 'api-error', status: sonnet ? 404 : 529, error: sonnet ? 'model_not_found' : 'overloaded', usage: { input_tokens: 0, output_tokens: 0 } } } as never
+    }
+    return { value: { isAnswered: true, text: 'an answer', usage: { input_tokens: 1, output_tokens: 1 } } } as never
+  })
+  engine(on)
+  expect(await ask($, 'why?')).toContain('(haiku, from 0 fixes')
+  expect(models).toEqual(['sonnet', 'haiku'])
+  sonnet = false
+  models.length = 0
+  const failed = await ask($, 'and now?')
+  expect(failed).toBe('No answer: sonnet: api-error (529, overloaded)')
+  // A failed ask is not remembered.
+  expect(await ask($, 'list')).toContain('Follow-ups remember 1 exchange,')
+})
+
+test('ask helpers: a period only in its compact forms, and the prompt in order', () => {
+  const split = (w: string) => splitAsk(w, NOW) as { period: Period; question: string }
+  expect(split('7d why?')).toMatchObject({ question: 'why?', period: { label: 'last 7 days' } })
+  expect(split('since 2026-10-20 why?')).toMatchObject({ question: 'why?', period: { label: 'since Oct 20' } })
+  expect(split('all of my prompts?')).toMatchObject({ question: 'all of my prompts?', period: { label: 'everything kept' } })
+  expect(split('2 days ago I wrote')).toMatchObject({ question: '2 days ago I wrote' })
+  expect(split('7days later')).toMatchObject({ question: '7days later' })
+  expect(typeof splitAsk('since yesterday why?', NOW)).toBe('string')
+
+  const p = askInput([entry('a file', 'the file', 'article')], 'everything kept', [{ from: 'teh', to: '', why: '' }], [{ q: 'q1', a: 'a1' }], 'why?')
+  expect(p.indexOf('Their kept fixes')).toBeLessThan(p.indexOf('latest prompts'))
+  expect(p).toContain('teh → (drop it)')
+  expect(p.indexOf('Q: q1\nA: a1')).toBeLessThan(p.indexOf('Their question: why?'))
 })

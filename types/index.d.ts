@@ -28,7 +28,11 @@ export type GrammarSummary = {
   top?: { from: string; to: string; kind: string; why: string; count: number }
 }
 /** A review shown this session: the row's text, and what the panel above the advice draws from. */
-export type GrammarReview = { text: string; summary: GrammarSummary; advice: string; model: string }
+export type GrammarReview = { text: string; summary: GrammarSummary; advice: string; model: string; followUp?: boolean }
+/** An answer to /grammar ask shown this session: the row's text, the answer and the footer under it. */
+export type GrammarAsk = { text: string; answer: string; footer: string }
+/** One exchange /grammar ask remembers for follow-ups: the question (or the review command) and the answer. */
+export type GrammarTurn = { q: string; a: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -39,6 +43,12 @@ declare module 'claude-code' {
       grammarHistory: boolean
       // Reviews shown this session, newest first, so their rows can draw the panel.
       grammarReviews: GrammarReview[]
+      // Answers to /grammar ask shown this session, newest first, so their rows can draw them.
+      grammarAsks: GrammarAsk[]
+      // What /grammar ask remembers for follow-ups, oldest first; /grammar ask clear empties it.
+      grammarThread: GrammarTurn[]
+      // Follow-ups remember earlier asks and reviews (the ask_memory setting).
+      grammarAskMemory: boolean
       grammarChecks: GrammarCheck[]
       grammarLastId: number
       // Failed checks in a row; at MAX_FAILS the checks pause until /grammar on.

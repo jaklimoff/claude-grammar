@@ -413,3 +413,47 @@ export const REVIEW_SYSTEM = `You coach a non-native English speaker who writes 
 Find the 3 to 5 habits behind the most mistakes, most frequent first. For each: a numbered line naming the habit and the rule that fixes it, in plain words, then one to three of their own fixes as examples, each on its own line as "  wrong → right".
 Skip one-off typos unless they share a pattern. If a fix looks like the proofreader's own mistake rather than the writer's, leave it out.
 Plain text only: no markdown, no headings, no bold, no intro and no closing line.`
+
+// Earlier asks and reviews a follow-up sends along, oldest first.
+export const ASK_MEMORY = 5
+// A question longer than this is cut; so is a remembered answer.
+export const MAX_QUESTION = 1000
+export const MAX_ANSWER = 2000
+// Fixes from this session's latest prompts sent with a question.
+export const ASK_RECENT = 10
+
+/** One remembered exchange: what was asked (a question, or the review command) and the answer. */
+export type Turn = { q: string; a: string }
+
+/**
+ * /grammar ask's words: a period first when they start with one (`7d`, `since 2026-10-01`), then the question. Only those
+ * compact forms count as a period, so a question that starts with "all" or "2 days" stays whole. A message when the
+ * period doesn't read.
+ */
+export const splitAsk = (words: string, now: number): { period: Period; question: string } | string => {
+  const w = words.trim()
+  const head = /^(\d+d|since\s+\S+)(?:\s+|$)/i.exec(w)
+  const period = parsePeriod(head === null ? '' : head[1] ?? '', now)
+  if (typeof period === 'string') {
+    return period
+  }
+  return { period, question: head === null ? w : w.slice(head[0].length).trim() }
+}
+
+/** The ask's prompt: the period's grouped fixes, this session's latest fixes, the remembered exchanges, then the question. */
+export const askInput = (fixes: readonly Entry[], label: string, recent: readonly GrammarFix[], turns: readonly Turn[], question: string) => {
+  const parts = [`Their kept fixes (${label}): ${fixes.length === 0 ? 'none kept.' : `\n${reviewInput(fixes)}`}`]
+  if (recent.length > 0) {
+    parts.push(['Fixes in their latest prompts, newest first:', ...recent.map(f => `${arrow(f)}${f.why === '' ? '' : ` (${f.why})`}`)].join('\n'))
+  }
+  if (turns.length > 0) {
+    parts.push(['Earlier in this conversation, oldest first:', ...turns.map(t => `Q: ${t.q}\nA: ${t.a}`)].join('\n\n'))
+  }
+  parts.push(`Their question: ${question}`)
+  return parts.join('\n\n')
+}
+
+export const ASK_SYSTEM = `You coach a non-native English speaker who writes prompts to a coding assistant, and answer their questions about English. You get the fixes a proofreader made to their prompts over time (grouped, with counts), the fixes in their latest prompts, and what was asked and answered earlier in this conversation.
+Answer the question directly, in a few short paragraphs at most. When their own fixes show the point, give one to three of them as examples, each on its own line as "  wrong → right". Use only fixes you were given and never invent mistakes they made. When there are too few fixes to see a pattern, say so and answer in general terms.
+If the question is not about English or their writing, say in one line that you only answer questions about English.
+Plain text only: no markdown, no headings, no bold, no intro and no closing line.`

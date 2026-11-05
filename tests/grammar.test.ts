@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { applyFixes, compileIgnore, compileSkip, cut, entriesFrom, mergeLists, parseLists, settingsFrom, wordCount } from '../hooks/config'
 import { BATCH, keepFixes, parseBatch, parseReply, system, typedPart } from '../hooks/check'
-import { STREAK_FROM, checkFor, cleanText, plainText, usefulNatural } from '../hooks/grammar'
+import { STREAK_FROM, checkFor, cleanText, plainText, replyNote, usefulNatural } from '../hooks/grammar'
 import { ASK_MEMORY, askInput, historyText, importWindow, keepable, kindOf, merge, pairsOf, parseHistory, parsePeriod, prune, record, reviewInput, splitAsk, statsText, summaryOf, trendOf, within } from '../hooks/history'
 import type { Period } from '../hooks/history'
 import type { Entry, History, Kind } from '../hooks/history'
@@ -36,12 +36,15 @@ const mountRow = ($: Engine, text: string, kind = 'composer') =>
 
 // Set by a test whose disk writes should fail.
 let writeFails: string | undefined
+// Environment variables besides HOME, set by a test after the engine is mocked.
+let env: Record<string, string> = {}
 
 /** A home folder, a project and the files in them; returns the files, written ones included. */
 const disk = (on: On, initial: Record<string, string> = {}) => {
   writeFails = undefined
+  env = {}
   const files = new Map(Object.entries(initial))
-  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }) as never)
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : env[e.name] }) as never)
   on('session.root', () => ({ value: '/work/app' }) as never)
   on('fs.exists', ($, e) => ({ value: files.has(e.path) }) as never)
   on('fs.read', ($, e) => {
@@ -78,7 +81,7 @@ const engine = (on: On, surfaces: string[] = ['terminal'], files: Record<string,
   on('session.start', () => ({ cwd: '/work/app' }) as never)
   on('command.register', () => ({ value: { command: 'grammar' } }) as never)
   on('session.surfaces', () => ({ value: surfaces }) as never)
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
   on('ui.render', () => ({ type: 'Box', props: { key: 'prompt' }, children: [] }) as never)
   return written
 }
@@ -500,6 +503,77 @@ test('a run that draws nowhere (claude -p) asks the model nothing', async ($, on
   expect(asked.prompts).toEqual([])
 })
 
+/** A prompt sent in a Cowork task, and the context it entered with. */
+const coworkSubmit = async ($: Engine, text: string) => {
+  const r = (await $.prompt.submit({ text } as never)) as { context?: readonly string[] }
+  return r.context ?? []
+}
+
+test('in Cowork the prompt waits for its check and Claude is asked to end its reply with the fixes', async ($, on) => {
+  const asked = haiku(on, { ...FIXES, natural: 'it should show up just above the prompt' }, [])
+  env.CLAUDE_CODE_ENTRYPOINT = 'remote_cowork'
+  const context = await coworkSubmit($, TYPO)
+  expect(asked.prompts).toEqual([TYPO])
+  expect(context).toEqual([
+    replyNote('✎ appea → appear (typo)  ·  about → above (wrong word)\n↳ it should show up just above the prompt'),
+  ])
+  // No kind asked for: nothing is kept from Cowork.
+  expect(asked.systems[0]).not.toContain('"kind"')
+  expect(asked.files.has(HISTORY_FILE)).toBe(false)
+})
+
+test('in Cowork a clean prompt, another language or a failed check adds nothing', async ($, on) => {
+  const asked = haiku(on, (n: number) => (n === 1 ? { english: true, fixes: [] } : n === 2 ? { english: false, fixes: [] } : 'no json'), [])
+  env.CLAUDE_CODE_ENTRYPOINT = 'local-agent-cowork'
+  expect(await coworkSubmit($, 'looks good to me')).toEqual([])
+  expect(await coworkSubmit($, 'das ist gut so')).toEqual([])
+  expect(await coworkSubmit($, TYPO)).toEqual([])
+  expect(asked.prompts.length).toBe(3)
+})
+
+test('three failed checks in a row stop holding up Cowork prompts', async ($, on) => {
+  const asked = haiku(on, 'no json', [])
+  env.CLAUDE_CODE_ENTRYPOINT = 'remote_cowork'
+  for (const n of [1, 2, 3, 4]) {
+    await coworkSubmit($, `prompt number ${n} here`)
+  }
+  expect(asked.prompts.length).toBe(3)
+})
+
+test('claude -p and the SDK get no Cowork note: no surface, but another entrypoint', async ($, on) => {
+  const clock = mock.clock(on)
+  const asked = haiku(on, FIXES, [])
+  env.CLAUDE_CODE_ENTRYPOINT = 'sdk-cli'
+  expect(await coworkSubmit($, TYPO)).toEqual([])
+  await clock.advance(5)
+  expect(asked.prompts).toEqual([])
+})
+
+test('the cowork setting off: Cowork prompts are not checked', { options: { cowork: false } }, async ($, on) => {
+  const asked = haiku(on, FIXES, [])
+  env.CLAUDE_CODE_ENTRYPOINT = 'remote_cowork'
+  expect(await coworkSubmit($, TYPO)).toEqual([])
+  expect(asked.prompts).toEqual([])
+})
+
+test('in Cowork skipped prompts, short ones and a paused check send nothing', { options: { min_words: 3 } }, async ($, on) => {
+  const asked = haiku(on, FIXES, [], { [HOME_FILE]: JSON.stringify({ skip: ['^deploy '] }) })
+  env.CLAUDE_CODE_ENTRYPOINT = 'remote_cowork'
+  expect(await coworkSubmit($, 'deploy teh app now')).toEqual([])
+  expect(await coworkSubmit($, 'ok go')).toEqual([])
+  expect(asked.prompts).toEqual([])
+})
+
+test('a terminal session with a Cowork entrypoint checks as usual, under the prompt', async ($, on) => {
+  const clock = mock.clock(on)
+  const asked = haiku(on, FIXES)
+  env.CLAUDE_CODE_ENTRYPOINT = 'remote_cowork'
+  expect(await coworkSubmit($, TYPO)).toEqual([])
+  await clock.advance(5)
+  expect(asked.prompts).toEqual([TYPO])
+  expect((await (await mountRow($, TYPO)).find({ key: 'gr-fixes' }))?.text).toContain('appear')
+})
+
 test('prompts under the minimum words are not checked', { options: { min_words: 3 } }, async ($, on) => {
   const clock = mock.clock(on)
   const asked = haiku(on, FIXES)
@@ -664,7 +738,9 @@ test('config helpers: settings, lists, words and cuts', () => {
     history: true,
     clean: true,
     askMemory: true,
+    cowork: true,
   })
+  expect(settingsFrom({ cowork: false }).cowork).toBe(false)
   expect(settingsFrom({ effort: 'max', max_chars: 5, dialect: 'au' })).toMatchObject({ effort: 'low', maxChars: 200, dialect: 'any', desktop: 'band' })
   expect(parseLists('{"ignore": ["a", 3, ""], "other": 1}')).toEqual({ ignore: ['a'], skip: [], history: true })
   expect(parseLists('{"history": false}').history).toBe(false)

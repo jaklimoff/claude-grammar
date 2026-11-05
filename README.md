@@ -67,6 +67,19 @@ A period is `7d` or `30d` (the last N days, today included), or `since 2026-10-0
 
 The on/off switches are settings, so they last across sessions and show under `/config` too.
 
+### In Cowork
+
+Cowork tasks in the desktop app load the plugin but draw nothing from it: no line under the prompt, no band, no toast, and `/grammar` is rejected as an unknown skill (Claude's side: [anthropics/claude-code#101213](https://github.com/anthropics/claude-code/issues/101213), [#106320](https://github.com/anthropics/claude-code/issues/106320); found by [@ArnauMontagud](https://github.com/ArnauMontagud) in [#3](https://github.com/jaklimoff/claude-grammar/issues/3)). So there the prompt waits for its check, a second or two, and when it has mistakes Claude is asked to end its reply with them:
+
+```
+Paris! Have a great trip.
+
+✎ i want know it → I want to know it (missing "to")  ·  what i planing → that I'm planning (verb form)
+↳ I want to know it for the trip I'm planning.
+```
+
+A clean prompt adds nothing. The fixes become part of the conversation, so Claude sees them too. Nothing is kept for `/grammar stats` from Cowork: the task runs on a machine of its own, and `/grammar` can't run there. A check that takes over 15 seconds or fails lets the prompt go without one; after 3 failures in a row the checks pause for the session. The `cowork` setting (on by default) turns this off. A Cowork task is told apart from `claude -p` and the SDK, which draw nothing either, by `CLAUDE_CODE_ENTRYPOINT`, which names Cowork there.
+
 ## Settings
 
 Under `/config`, or in `settings.json` under `pluginConfigs` → `grammar@grammar` (the plugin as you installed it: `grammar@<marketplace>`) → `options`:
@@ -86,6 +99,7 @@ Under `/config`, or in `settings.json` under `pluginConfigs` → `grammar@gramma
 | `clean` | `true` | A green `✓` before a prompt with no mistakes, and from 3 in a row, how many in a row. In the desktop app it shows as `desktop` says: in the band, as a transcript line (`line` only), or as a short toast. |
 | `history` | `true` | Keeps each fix for `/grammar stats` and `/grammar review`. Same as `/grammar history on\|off`. |
 | `ask_memory` | `true` | `/grammar ask` remembers the last 5 asks and reviews of the session for follow-ups. Same as `/grammar ask memory on\|off`. |
+| `cowork` | `true` | In a Cowork task, which shows no plugin output, the prompt waits for its check and Claude ends its reply with the fixes. Off, Cowork prompts aren't checked. See [In Cowork](#in-cowork). |
 
 ## Ignore and skip lists
 
@@ -110,7 +124,7 @@ Put a `grammar.json` in your Claude Code folder (`~/.claude/grammar.json`, or `$
 - **Checked:** spelling, grammar (tense, agreement, articles, prepositions, word order), a wrong word, a missing word.
 - **Left alone:** lowercase, punctuation style, dropped apostrophes (`lets`, `dont`), slang and short forms (`smth`, `pls`, `btw`), code, paths, logs and pasted text.
 - **Only a `✓`:** a clean prompt (with `clean` on).
-- **No line at all:** a prompt that is not English, slash commands, and anything in `claude -p` or the SDK, where nothing would show it.
+- **No line at all:** a prompt that is not English, slash commands, and anything in `claude -p` or the SDK, where nothing would show it. In a Cowork task the fixes come at the end of Claude's reply instead: see [In Cowork](#in-cowork).
 
 The native-speaker line is rare on purpose. It shows only when a sentence is clearly unidiomatic even with the grammar fixed, not for style.
 
@@ -236,7 +250,7 @@ A mod is code that runs inside Claude Code with your permissions, so read it bef
 | `$.clock.now` | The time on each kept fix. |
 | `$.ui.toast` | The one notice for a file that doesn't parse, the one naming the history file until it exists, and each check's fixes in the desktop app when `desktop` is `toast`. |
 | `$.ui.log` | Each check's fixes as a dim transcript line in the desktop app, where the line under the prompt isn't drawn (the `desktop` setting, `band` by default, which adds the colored band too). |
-| `$.session.surfaces` | Skipping runs that draw nowhere. |
+| `$.session.surfaces` | Skipping runs that draw nowhere, and telling a Cowork task (no surface, and `CLAUDE_CODE_ENTRYPOINT` read through `$.env.get`) from them. |
 | `$.clock.after`, `$.ui.resolve` | Running the check off the prompt's path, and drawing the lines. |
 
 No other files, no processes, no other network. `claude plugin validate .` prints the same list for any mod. The full note is in [PRIVACY.md](PRIVACY.md).
@@ -246,6 +260,7 @@ No other files, no processes, no other network. `claude plugin validate .` print
 - Claude Code with mods. Tested with v2.1.314, in the terminal. Mods can change between releases, so if the line stops showing after an update, check the [changelog](https://code.claude.com/docs/en/changelog).
 - A Nerd Font in your terminal for the icons. Without one, they show as empty squares; set `icons` to off for plain characters.
 - Not drawn in the VS Code extension or in `claude -p`. In the desktop app the line under the prompt isn't drawn either, so the newest check shows in color in a band above the prompt box, with a dim transcript line as the record (the `desktop` setting; `line`, `toast` or `off` also work).
+- In Cowork tasks the fixes come at the end of Claude's reply, since Cowork draws nothing from mods: see [In Cowork](#in-cowork).
 
 ## How it works
 
@@ -255,7 +270,7 @@ The plugin is four files: `hooks/grammar.tsx` (the hooks, commands and drawing),
 |---|---|
 | `session.start` | Sets the switches from the settings (moving 1.0's from `$.store` once) and registers `/grammar`. |
 | `command.run` | Handles `/grammar`. |
-| `prompt.submit` | Queues a check of the prompt on a timer, so the prompt is never held up, and passes it on unchanged. Once the check is drawn, its fixes go into the history. |
+| `prompt.submit` | Queues a check of the prompt on a timer, so the prompt is never held up, and passes it on unchanged. Once the check is drawn, its fixes go into the history. In a Cowork task it checks first instead and, when there are fixes, passes them on beside the prompt for Claude to end its reply with. |
 | `ui.render` (`UserMessage`) | Draws the fixes and the native-speaker line under the transcript row of the prompt they belong to. |
 | `ui.render` (`AbovePrompt`) | Draws the newest check's fixes in a band above the prompt box in the desktop app, with a Hide button (the `desktop` setting). |
 | `ui.render` (`CommandOutput`) | Draws the `/grammar review` card and `/grammar ask` answers in place of their plain text. |

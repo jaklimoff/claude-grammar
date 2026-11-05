@@ -22,6 +22,7 @@ export type Settings = {
   history: boolean
   clean: boolean
   askMemory: boolean
+  cowork: boolean
 }
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
@@ -45,6 +46,7 @@ export const settingsFrom = (o: PluginOptions): Settings => ({
   history: o.history !== false,
   clean: o.clean !== false,
   askMemory: o.ask_memory !== false,
+  cowork: o.cowork !== false,
 })
 
 /**

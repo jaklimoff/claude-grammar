@@ -241,14 +241,14 @@ const migrate = async ($: EngineInterface) => {
   return moved
 }
 
-const ask = async ($: EngineInterface, s: Settings, text: string, natural: boolean, kind: boolean, ignore: Ignore) => {
+const ask = async ($: EngineInterface, s: Settings, text: string, natural: boolean, kind: boolean, ignore: Ignore, timeoutMs = 30000) => {
   const request = {
     model: s.model,
     system: system({ natural, dialect: s.dialect, showWhy: s.showWhy, kind, ignore: ignore.words }),
     prompt: cut(text, s.maxChars),
     maxTokens: 4096,
     effort: s.effort,
-    timeoutMs: 30000,
+    timeoutMs,
   }
   try {
     return await $.model.complete(request)
@@ -337,18 +337,78 @@ const showElsewhere = async ($: EngineInterface, s: Settings, final: GrammarChec
   }
 }
 
-/** Queues a check of a prompt you typed, unless it is off, paused, too short, or nothing would show it. */
-const queue = async ($: EngineInterface, s: Settings, e: { text: string }) => {
+/** The part of a prompt to check, or undefined when it is not checked: off, paused, too short, a command, not typed. */
+const checkable = async ($: EngineInterface, s: Settings, e: { text: string }) => {
   // Slash commands and hidden prompts are not typed English. Loose, as older type builds lack both fields.
   const { command, isMeta } = e as { command?: unknown; isMeta?: boolean }
   const text = typedPart(e.text)
   if (command !== undefined || isMeta === true || !/[A-Za-z]{2}/.test(text) || wordCount(text) < s.minWords) {
-    return
+    return undefined
   }
   if (!(await read($, isOn)) || (await read($, fails)) >= MAX_FAILS) {
+    return undefined
+  }
+  return text
+}
+
+// How long a Cowork prompt waits for its check before it is sent without one.
+const COWORK_TIMEOUT_MS = 15000
+
+/**
+ * A Cowork task in the desktop app: no surface, and an entrypoint that names Cowork (remote_cowork for a task in the
+ * cloud). claude -p and the SDK have no surface either, but another entrypoint.
+ */
+const inCowork = async ($: EngineInterface) =>
+  (await $.session.surfaces()).length === 0 && /cowork/i.test((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? '')
+
+/** What Claude is told beside a Cowork prompt with mistakes: end the reply with these lines. */
+export const replyNote = (lines: string) =>
+  `The grammar plugin checked the English of the user's message above. Cowork cannot show plugin output, so end your reply with the lines below, on their own after everything else, exactly as written, and say nothing about them:
+
+${lines}
+
+Otherwise answer the message as you would without this note.`
+
+/**
+ * Cowork draws no plugin UI at all (no band, toast, transcript line or slash command), so there the prompt waits for
+ * its check and Claude is asked to end its reply with the fixes. The note for Claude, or undefined: not Cowork, the
+ * cowork setting off, nothing to fix, not English, or a failed check (the prompt is sent as it is).
+ */
+const checkForReply = async ($: EngineInterface, s: Settings, e: { text: string }) => {
+  if (!s.cowork || !(await inCowork($))) {
+    return undefined
+  }
+  const text = await checkable($, s, e)
+  const lists = await loadLists($).catch(() => EMPTY)
+  if (text === undefined || compileSkip(lists.skip).some(re => re.test(text))) {
+    return undefined
+  }
+  const ignore = compileIgnore(lists.ignore)
+  const natural = await read($, isNatural)
+  const r = await ask($, s, text, natural, false, ignore, COWORK_TIMEOUT_MS)
+  let reply: ReturnType<typeof parseReply> | undefined
+  try {
+    reply = r.isAnswered ? parseReply(r.text) : undefined
+  } catch {
+    reply = undefined
+  }
+  // Failures still count, so a blocked model stops holding up every prompt after MAX_FAILS.
+  await update($, fails, k => (reply === undefined ? k + 1 : 0))
+  if (reply === undefined || reply === null) {
+    return undefined
+  }
+  const fixes = keepFixes(reply.fixes, text, ignore)
+  const better = natural ? usefulNatural(reply.natural, text, fixes, ignore) : null
+  return fixes.length === 0 && better === null ? undefined : replyNote(`${DESKTOP_ICONS.logo} ${plainText(fixes, better, s.showWhy)}`)
+}
+
+/** Queues a check of a prompt you typed, unless it is not checked or nothing would show it. */
+const queue = async ($: EngineInterface, s: Settings, e: { text: string }) => {
+  const text = await checkable($, s, e)
+  if (text === undefined) {
     return
   }
-  // A run that draws nowhere (claude -p, the SDK) would never show the fixes: no model call there.
+  // A run that draws nowhere (claude -p, the SDK, Cowork) would never show the fixes: no model call there.
   if ((await $.session.surfaces()).length === 0) {
     return
   }
@@ -743,7 +803,11 @@ export const register: Register = (on, options) => {
 
   // Only prompts with Latin letters can be English.
   on('prompt.submit', { text: /[A-Za-z]{2}/ }, async ($, e, next) => {
-    // A failed check must never hold up the prompt.
+    // A failed check must never stop the prompt.
+    const note = await checkForReply($, s, e).catch(() => undefined)
+    if (note !== undefined) {
+      return next({ ...e, context: [...(e.context ?? []), note] })
+    }
     await queue($, s, e).catch(() => undefined)
 
     return next(e)

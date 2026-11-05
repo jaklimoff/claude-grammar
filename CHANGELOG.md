@@ -2,6 +2,12 @@
 
 Each version is tagged `vX.Y.Z` and has a [GitHub release](https://github.com/jaklimoff/claude-grammar/releases) with its section below as the notes. Bump `version` in `.claude-plugin/plugin.json` on every change to what ships: installed copies update only when it changes. How releases work: [CONTRIBUTING.md](CONTRIBUTING.md#versions-and-releases).
 
+## 1.6.0 (2026-11-05)
+
+- Cowork tasks in the desktop app load the plugin but draw nothing from it, so no prompt was checked there ([#3](https://github.com/jaklimoff/claude-grammar/issues/3), thanks [@ArnauMontagud](https://github.com/ArnauMontagud)). Now a Cowork prompt waits for its check, a second or two, and when it has mistakes Claude ends its reply with them: the fixes line and the native-speaker line as plain text. A clean prompt, another language or a failed check adds nothing; 3 failures in a row pause the checks.
+- A Cowork task is told by no surface plus a `CLAUDE_CODE_ENTRYPOINT` that names Cowork, so `claude -p` and the SDK still send nothing.
+- A `cowork` setting (on by default) turns it off. Nothing from Cowork is kept in the history.
+
 ## 1.5.0 (2026-11-04)
 
 - `/grammar ask [period] <question>`: ask Sonnet anything about your English. One call with the question, the period's grouped fixes and this session's latest fixes; examples are drawn like a review's. No minimum of kept fixes. Falls back to your `model` setting when Sonnet isn't allowed or available, like the review.
